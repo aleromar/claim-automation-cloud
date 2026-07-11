@@ -1,0 +1,26 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+*.log
+
+# Frontend build / test output
+frontend/coverage/
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+
+# Secrets / local config (future features)
+.env
+local.settings.json
+
+# OS / editor
+.DS_Store
