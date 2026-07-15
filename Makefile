@@ -14,11 +14,14 @@ dev:
 	kill %1 2>/dev/null || true
 
 # One-time local setup: seed the dev secret store with a random session signing
-# key (the backend fails fast at startup without one — never auto-generated).
+# key (never auto-generated at startup) and a placeholder Google client secret —
+# the backend fails fast without both. Replace the placeholder for real logins.
 seed-dev:
-	cd backend && uv run python -c "import secrets; from app.secret_store import FileSecretStore; \
+	cd backend && uv run python -c "import secrets; \
+	from app.secret_store import GOOGLE_CLIENT_SECRET, SESSION_SIGNING_KEY, FileSecretStore; \
 	s = FileSecretStore('.secrets.json'); \
-	s.get('session-signing-key') or s.set('session-signing-key', secrets.token_urlsafe(48)); \
+	s.get(SESSION_SIGNING_KEY) or s.set(SESSION_SIGNING_KEY, secrets.token_urlsafe(48)); \
+	s.get(GOOGLE_CLIENT_SECRET) or s.set(GOOGLE_CLIENT_SECRET, 'dev-placeholder-not-a-real-secret'); \
 	print('.secrets.json seeded')"
 
 # Unit tests, both stacks.

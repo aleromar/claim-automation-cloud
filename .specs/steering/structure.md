@@ -44,8 +44,8 @@ own repo later changes nothing but the deploy wiring.
 - **Vite** = the frontend's dev server *and* production bundler (the JS analogue of uvicorn + a
   build step). Current industry default; Create React App is deprecated. Its dev proxy forwards
   `/api/*` to the backend so the SPA uses a relative URL in every environment.
-- **Playwright** = the one end-to-end test that boots both stacks in a real browser and asserts
-  the page shows "All good" — closes the gap the mocked unit tests leave.
+- **Playwright** = the end-to-end suite that boots both stacks (plus the stub IdP) in a real
+  browser — login flow, auth gate, and liveness — closes the gap the mocked unit tests leave.
 
 ### Versions & pinning (reproducibility)
 
@@ -85,7 +85,7 @@ app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONY
   the adapter itself is covered by one small unit test. Proving the real `func start` path is
   deferred hardening.
 
-## Testing conventions (TDD-first — constitution Article I)
+## Testing conventions (TDD-first — constitution Principle 11)
 
 **Tests are written before implementation. RED → GREEN → REFACTOR.**
 

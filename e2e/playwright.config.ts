@@ -35,7 +35,7 @@ export default defineConfig({
         GOOGLE_TOKEN_URL: "http://localhost:9100/token",
         GOOGLE_CLIENT_ID: "e2e-client",
         OAUTH_REDIRECT_URI: "http://localhost:8000/api/auth/callback",
-        ALLOWLIST_EMAIL: "operator@example.com",
+        OPERATOR_EMAIL: "operator@example.com",
         FRONTEND_BASE_URL: "http://localhost:5173",
         SECRET_STORE_BACKEND: "file",
         SECRET_STORE_FILE_PATH: "../e2e/.tmp/secrets.json",

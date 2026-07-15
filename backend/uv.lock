@@ -61,6 +61,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "azure-functions" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "uvicorn" },
@@ -68,7 +69,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "respx" },
     { name = "ruff" },
@@ -78,6 +78,7 @@ dev = [
 requires-dist = [
     { name = "azure-functions", specifier = ">=1.21" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
     { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "uvicorn", specifier = ">=0.34" },
@@ -85,7 +86,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "respx", specifier = ">=0.23.1" },
     { name = "ruff", specifier = ">=0.9" },

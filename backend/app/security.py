@@ -13,13 +13,13 @@ import jwt
 from fastapi import Depends, HTTPException, Request
 
 from app.config import Settings, get_settings
-from app.secret_store import create_secret_store
+from app.secret_store import SESSION_SIGNING_KEY, create_secret_store, require_secret
 
 STATE_TTL_SECONDS = 600
 
 
 class InvalidSession(Exception):
-    """Bearer token failed verification (signature / expiry / claims / allowlist)."""
+    """Bearer token failed verification (signature / expiry / claims / operator email)."""
 
 
 def _state_mac(signing_key: str, nonce: str, timestamp: str) -> str:
@@ -40,10 +40,8 @@ def verify_state(state: str, signing_key: str) -> bool:
     nonce, timestamp, mac = parts
     if not hmac.compare_digest(mac, _state_mac(signing_key, nonce, timestamp)):
         return False
-    try:
-        age = time.time() - int(timestamp)
-    except ValueError:
-        return False
+    # A valid MAC implies make_state built the timestamp — always an int.
+    age = time.time() - int(timestamp)
     return 0 <= age <= STATE_TTL_SECONDS
 
 
@@ -53,8 +51,8 @@ def mint_session_jwt(email: str, signing_key: str, ttl_hours: int) -> str:
     return jwt.encode(claims, signing_key, algorithm="HS256")
 
 
-def verify_session_jwt(token: str, signing_key: str, allowlist_email: str) -> str:
-    """Verify signature (pinned HS256), expiry, and the allowlisted email claim.
+def verify_session_jwt(token: str, signing_key: str, operator_email: str) -> str:
+    """Verify signature (pinned HS256), expiry, and the operator email claim.
 
     Returns the email; raises InvalidSession on any failure (REQ-3.1/3.2).
     """
@@ -68,8 +66,8 @@ def verify_session_jwt(token: str, signing_key: str, allowlist_email: str) -> st
     except jwt.InvalidTokenError as exc:
         raise InvalidSession(str(exc)) from exc
     email = claims.get("email")
-    if not email or email != allowlist_email:
-        raise InvalidSession("email not allowlisted")
+    if not email or email != operator_email:
+        raise InvalidSession("email is not the configured operator")
     return email
 
 
@@ -78,8 +76,8 @@ def require_operator(request: Request, settings: Settings = Depends(get_settings
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    signing_key = create_secret_store(settings).get("session-signing-key") or ""
+    signing_key = require_secret(create_secret_store(settings), SESSION_SIGNING_KEY)
     try:
-        return verify_session_jwt(token, signing_key, settings.allowlist_email)
+        return verify_session_jwt(token, signing_key, settings.operator_email)
     except InvalidSession as exc:
         raise HTTPException(status_code=401, detail="Not authenticated") from exc

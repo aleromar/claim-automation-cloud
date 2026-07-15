@@ -9,12 +9,15 @@ import respx
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from app.config import get_settings
-from app.secret_store import FileSecretStore
+from app.secret_store import (
+    GMAIL_REFRESH_TOKEN,
+    GOOGLE_CLIENT_SECRET,
+    SESSION_SIGNING_KEY,
+    FileSecretStore,
+)
 from app.security import make_state, mint_session_jwt, verify_session_jwt, verify_state
+from tests.conftest import OPERATOR, SIGNING_KEY
 
-SIGNING_KEY = "k" * 32
-OPERATOR = "operator@example.com"
 CLIENT_ID = "client-id-123"
 AUTH_URL = "https://idp.test/authorize"
 TOKEN_URL = "https://idp.test/token"
@@ -23,21 +26,15 @@ GOOGLE_ISS = "https://accounts.google.com"
 
 
 @pytest.fixture
-def secret_path(tmp_path, monkeypatch):
-    path = tmp_path / "secrets.json"
-    monkeypatch.setenv("SECRET_STORE_BACKEND", "file")
-    monkeypatch.setenv("SECRET_STORE_FILE_PATH", str(path))
-    monkeypatch.setenv("ALLOWLIST_EMAIL", OPERATOR)
+def secret_path(secret_env, monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", CLIENT_ID)
     monkeypatch.setenv("GOOGLE_AUTH_URL", AUTH_URL)
     monkeypatch.setenv("GOOGLE_TOKEN_URL", TOKEN_URL)
     monkeypatch.setenv("FRONTEND_BASE_URL", FRONTEND)
-    store = FileSecretStore(path)
-    store.set("session-signing-key", SIGNING_KEY)
-    store.set("google-client-secret", "shh-client-secret")
-    get_settings.cache_clear()
-    yield path
-    get_settings.cache_clear()
+    store = FileSecretStore(secret_env)
+    store.set(SESSION_SIGNING_KEY, SIGNING_KEY)
+    store.set(GOOGLE_CLIENT_SECRET, "shh-client-secret")
+    return secret_env
 
 
 @pytest.fixture
@@ -100,8 +97,8 @@ def test_callback_happy_path_mints_jwt_and_stores_refresh_token(client, secret_p
     location = resp.headers["location"]
     assert location.startswith(FRONTEND)
     token = _fragment(location).removeprefix("token=")
-    assert verify_session_jwt(token, SIGNING_KEY, allowlist_email=OPERATOR) == OPERATOR
-    assert FileSecretStore(secret_path).get("gmail-refresh-token") == "rt-1"
+    assert verify_session_jwt(token, SIGNING_KEY, operator_email=OPERATOR) == OPERATOR
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) == "rt-1"
     sent = parse_qs(route.calls.last.request.content.decode())
     assert sent["code"] == ["abc"]
     assert sent["client_id"] == [CLIENT_ID]
@@ -111,13 +108,13 @@ def test_callback_happy_path_mints_jwt_and_stores_refresh_token(client, secret_p
 
 @respx.mock
 def test_callback_without_refresh_token_keeps_stored_one(client, secret_path):
-    FileSecretStore(secret_path).set("gmail-refresh-token", "rt-old")
+    FileSecretStore(secret_path).set(GMAIL_REFRESH_TOKEN, "rt-old")
     _mock_token_endpoint({"id_token": _id_token()})
 
     resp = client.get(f"/api/auth/callback?code=abc&state={make_state(SIGNING_KEY)}")
 
     assert _fragment(resp.headers["location"]).startswith("token=")
-    assert FileSecretStore(secret_path).get("gmail-refresh-token") == "rt-old"
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) == "rt-old"
 
 
 @respx.mock
@@ -127,7 +124,7 @@ def test_callback_without_refresh_token_first_login_still_succeeds(client, secre
     resp = client.get(f"/api/auth/callback?code=abc&state={make_state(SIGNING_KEY)}")
 
     assert _fragment(resp.headers["location"]).startswith("token=")
-    assert FileSecretStore(secret_path).get("gmail-refresh-token") is None
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) is None
 
 
 @respx.mock
@@ -138,7 +135,7 @@ def test_callback_bad_state_rejected(client, secret_path):
 
     assert _fragment(resp.headers["location"]) == "error=login_failed"
     assert not route.called
-    assert FileSecretStore(secret_path).get("gmail-refresh-token") is None
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) is None
 
 
 @respx.mock
@@ -146,6 +143,16 @@ def test_callback_failed_exchange_rejected(client):
     _mock_token_endpoint(status=400)
     resp = client.get(f"/api/auth/callback?code=bad&state={make_state(SIGNING_KEY)}")
     assert _fragment(resp.headers["location"]) == "error=login_failed"
+
+
+@respx.mock
+def test_callback_token_response_without_id_token_rejected(client, secret_path):
+    _mock_token_endpoint({"access_token": "at-1", "refresh_token": "rt-1"})
+
+    resp = client.get(f"/api/auth/callback?code=abc&state={make_state(SIGNING_KEY)}")
+
+    assert _fragment(resp.headers["location"]) == "error=login_failed"
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) is None
 
 
 @respx.mock
@@ -157,7 +164,7 @@ def test_callback_access_denied_no_token_request(client):
 
 
 @respx.mock
-def test_callback_non_allowlisted_email_rejected(client, secret_path):
+def test_callback_non_operator_email_rejected(client, secret_path):
     _mock_token_endpoint(
         {"id_token": _id_token(email="mallory@example.com"), "refresh_token": "rt-evil"}
     )
@@ -165,7 +172,7 @@ def test_callback_non_allowlisted_email_rejected(client, secret_path):
     resp = client.get(f"/api/auth/callback?code=abc&state={make_state(SIGNING_KEY)}")
 
     assert _fragment(resp.headers["location"]) == "error=unauthorized"
-    assert FileSecretStore(secret_path).get("gmail-refresh-token") is None
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) is None
 
 
 @pytest.mark.parametrize(
@@ -184,7 +191,7 @@ def test_callback_invalid_id_token_claims_rejected(client, secret_path, id_token
     resp = client.get(f"/api/auth/callback?code=abc&state={make_state(SIGNING_KEY)}")
 
     assert _fragment(resp.headers["location"]) == "error=login_failed"
-    assert FileSecretStore(secret_path).get("gmail-refresh-token") is None
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) is None
 
 
 @respx.mock
@@ -219,21 +226,16 @@ def test_me_valid_jwt(client):
     assert resp.json() == {"email": OPERATOR}
 
 
+# Per-failure-mode JWT rejection lives in test_security.py; here only the guard's
+# header handling plus one representative invalid token (verification is forwarded).
 @pytest.mark.parametrize(
     "token_factory",
     [
         lambda: None,  # missing
         lambda: "garbage",  # malformed
-        lambda: mint_session_jwt(OPERATOR, SIGNING_KEY, ttl_hours=-1),  # expired
         lambda: mint_session_jwt(OPERATOR, "x" * 32, ttl_hours=8),  # bad signature
-        lambda: jwt.encode(  # wrong algorithm
-            {"email": OPERATOR, "iat": int(time.time()), "exp": int(time.time()) + 300},
-            SIGNING_KEY,
-            algorithm="HS512",
-        ),
-        lambda: mint_session_jwt("mallory@example.com", SIGNING_KEY, ttl_hours=8),  # wrong email
     ],
-    ids=["missing", "malformed", "expired", "bad-sig", "wrong-alg", "wrong-email"],
+    ids=["missing", "malformed", "bad-sig"],
 )
 def test_me_invalid_tokens_401(client, token_factory):
     token = token_factory()
@@ -244,7 +246,3 @@ def test_me_invalid_tokens_401(client, token_factory):
 def test_me_non_bearer_scheme_401(client):
     resp = _me(client, header="Basic abc123")
     assert resp.status_code == 401
-
-
-def test_health_stays_public(client):
-    assert client.get("/api/health").status_code == 200

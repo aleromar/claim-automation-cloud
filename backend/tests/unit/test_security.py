@@ -6,7 +6,12 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
+from app.main import app
+from app.secret_store import (
+    GOOGLE_CLIENT_SECRET,
+    SESSION_SIGNING_KEY,
+    FileSecretStore,
+)
 from app.security import (
     InvalidSession,
     make_state,
@@ -14,9 +19,8 @@ from app.security import (
     verify_session_jwt,
     verify_state,
 )
-
-KEY = "k" * 32
-OPERATOR = "operator@example.com"
+from tests.conftest import OPERATOR
+from tests.conftest import SIGNING_KEY as KEY
 
 
 # --- state (CSRF) ---
@@ -54,7 +58,7 @@ def test_state_expired_rejected(monkeypatch):
 
 def test_jwt_roundtrip_returns_email():
     token = mint_session_jwt(OPERATOR, KEY, ttl_hours=8)
-    assert verify_session_jwt(token, KEY, allowlist_email=OPERATOR) == OPERATOR
+    assert verify_session_jwt(token, KEY, operator_email=OPERATOR) == OPERATOR
 
 
 def test_jwt_has_iat_and_exp_8h():
@@ -66,57 +70,69 @@ def test_jwt_has_iat_and_exp_8h():
 def test_jwt_expired_rejected():
     token = mint_session_jwt(OPERATOR, KEY, ttl_hours=-1)
     with pytest.raises(InvalidSession):
-        verify_session_jwt(token, KEY, allowlist_email=OPERATOR)
+        verify_session_jwt(token, KEY, operator_email=OPERATOR)
 
 
 def test_jwt_wrong_signature_rejected():
     token = mint_session_jwt(OPERATOR, "x" * 32, ttl_hours=8)
     with pytest.raises(InvalidSession):
-        verify_session_jwt(token, KEY, allowlist_email=OPERATOR)
+        verify_session_jwt(token, KEY, operator_email=OPERATOR)
 
 
 def test_jwt_wrong_algorithm_rejected():
     hs512 = jwt.encode({"email": OPERATOR, "exp": time.time() + 300}, KEY, algorithm="HS512")
     with pytest.raises(InvalidSession):
-        verify_session_jwt(hs512, KEY, allowlist_email=OPERATOR)
+        verify_session_jwt(hs512, KEY, operator_email=OPERATOR)
 
 
 def test_jwt_alg_none_rejected():
     unsigned = jwt.encode({"email": OPERATOR, "exp": time.time() + 300}, None, algorithm="none")
     with pytest.raises(InvalidSession):
-        verify_session_jwt(unsigned, KEY, allowlist_email=OPERATOR)
+        verify_session_jwt(unsigned, KEY, operator_email=OPERATOR)
 
 
-def test_jwt_non_allowlisted_email_rejected():
+def test_jwt_non_operator_email_rejected():
     token = mint_session_jwt("mallory@example.com", KEY, ttl_hours=8)
     with pytest.raises(InvalidSession):
-        verify_session_jwt(token, KEY, allowlist_email=OPERATOR)
+        verify_session_jwt(token, KEY, operator_email=OPERATOR)
+
+
+def test_jwt_missing_email_claim_rejected():
+    now = int(time.time())
+    token = jwt.encode({"iat": now, "exp": now + 300}, KEY, algorithm="HS256")
+    with pytest.raises(InvalidSession):
+        verify_session_jwt(token, KEY, operator_email=OPERATOR)
 
 
 # --- startup fail-fast (REQ-5.4) — lifespan only runs under `with` ---
 
 
-@pytest.fixture
-def fresh_settings(tmp_path, monkeypatch):
-    monkeypatch.setenv("SECRET_STORE_BACKEND", "file")
-    monkeypatch.setenv("SECRET_STORE_FILE_PATH", str(tmp_path / "secrets.json"))
-    get_settings.cache_clear()
-    yield tmp_path / "secrets.json"
-    get_settings.cache_clear()
-
-
-def test_startup_fails_without_signing_key(fresh_settings):
-    from app.main import app
-
+def test_startup_fails_without_signing_key(secret_env):
     with pytest.raises(RuntimeError, match="session-signing-key"):
         with TestClient(app):
             pass
 
 
-def test_startup_succeeds_with_signing_key(fresh_settings):
-    from app.main import app
-    from app.secret_store import FileSecretStore
+def test_startup_fails_without_client_secret(secret_env):
+    FileSecretStore(secret_env).set(SESSION_SIGNING_KEY, KEY)
+    with pytest.raises(RuntimeError, match="google-client-secret"):
+        with TestClient(app):
+            pass
 
-    FileSecretStore(fresh_settings).set("session-signing-key", KEY)
+
+def test_startup_fails_without_operator_email(secret_env, monkeypatch):
+    store = FileSecretStore(secret_env)
+    store.set(SESSION_SIGNING_KEY, KEY)
+    store.set(GOOGLE_CLIENT_SECRET, "shh")
+    monkeypatch.delenv("OPERATOR_EMAIL")
+    with pytest.raises(RuntimeError, match="OPERATOR_EMAIL"):
+        with TestClient(app):
+            pass
+
+
+def test_startup_succeeds_fully_seeded(secret_env):
+    store = FileSecretStore(secret_env)
+    store.set(SESSION_SIGNING_KEY, KEY)
+    store.set(GOOGLE_CLIENT_SECRET, "shh")
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
