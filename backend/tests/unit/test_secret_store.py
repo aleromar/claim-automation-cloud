@@ -57,9 +57,10 @@ def test_factory_selects_file_backend(tmp_path):
     assert isinstance(store, FileSecretStore)
 
 
-def test_factory_keyvault_fails_fast():
-    with pytest.raises(NotImplementedError, match="not implemented in this slice"):
-        create_secret_store(_settings(secret_store_backend="keyvault"))
+def test_factory_keyvault_without_uri_fails_fast():
+    """keyvault backend is implemented (deployment REQ-2) but demands its vault URI."""
+    with pytest.raises(RuntimeError, match="KEY_VAULT_URI"):
+        create_secret_store(_settings(secret_store_backend="keyvault", key_vault_uri=""))
 
 
 def test_factory_unknown_backend_rejected():

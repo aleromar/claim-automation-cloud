@@ -43,7 +43,9 @@ own repo later changes nothing but the deploy wiring.
 
 - **Vite** = the frontend's dev server *and* production bundler (the JS analogue of uvicorn + a
   build step). Current industry default; Create React App is deprecated. Its dev proxy forwards
-  `/api/*` to the backend so the SPA uses a relative URL in every environment.
+  `/api/*` to the backend in dev; in prod the SPA is **built with `VITE_API_BASE_URL`** set to
+  the Function App origin (SWA and Functions are cross-origin — D22). Call sites stay
+  origin-agnostic via `apiUrl()` in `src/api.ts`.
 - **Playwright** = the end-to-end suite that boots both stacks (plus the stub IdP) in a real
   browser — login flow, auth gate, and liveness — closes the gap the mocked unit tests leave.
 
@@ -110,7 +112,9 @@ Each stack uses its ecosystem's native convention — do not homogenize:
   ordered stdlib → third-party → local; formatted + linted by **ruff**.
 - **TypeScript:** `camelCase` vars/funcs, `PascalCase` components/types; one component per file;
   formatted by **Prettier**, linted by **ESLint**.
-- **API paths** are prefixed `/api` (matches the SWA `/api` route convention).
+- **API paths** are prefixed `/api`; the frontend prepends `VITE_API_BASE_URL` in prod
+  (empty in dev → relative + Vite proxy). Supersedes the earlier "SWA route in prod" wording —
+  SWA linked backends need the paid Standard plan (see deployment spec, 2026-07-15).
 
 ### Frontend data-fetching pattern
 
@@ -143,6 +147,8 @@ add `docker-compose.yml` (Azurite) and move integration/e2e to run against `func
 - Dev runtime-written secrets live in a **gitignored local secret file** (0600, atomic
   writes) behind the SecretStore abstraction — env vars alone can't accept runtime writes
   (2026-07-14).
-- Relative `/api/*` URLs everywhere; Vite proxy in dev, SWA route in prod.
+- `/api/*` URLs via `apiUrl()`: relative in dev (Vite proxy), absolute Function App origin in
+  prod (`VITE_API_BASE_URL`, set by the SWA deploy workflow). Supersedes "SWA route in prod"
+  (2026-07-15, deployment spec — SWA linked backend requires Standard $9/mo, conflicts with D22).
 - No secrets in the repo; local read-only config via gitignored `.env`; runtime-written
   secrets via the gitignored local secret file (see 2026-07-14 entry above).

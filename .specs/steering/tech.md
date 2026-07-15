@@ -23,7 +23,7 @@ unchanged from `../claim_automation`; the rest are re-platformed.
 | 10 | Secrets | YAML + JSON files | secret manager |
 | 11 | Observability | heartbeat file + rotating logs | cloud logging/metrics + heartbeat row in DB |
 | 12 | Operator UI | local NiceGUI panel | hosted dashboard (this project's frontend) |
-| 13 | Notifications | bug-report email via Gmail send | keep (Gmail send) and/or cloud alerting |
+| 13 | Notifications | bug-report email via Gmail send | App Insights Smart Detection (D20); Gmail send dropped |
 
 > **Not a block: concurrency control (deliberately deferred).** The original app used a
 > `filelock` single-instance guard. We are **not** carrying it over at this stage — it adds

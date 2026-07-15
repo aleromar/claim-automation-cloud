@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { apiUrl } from "./api";
 import { authFetch, getToken } from "./auth";
 import Login from "./Login";
 
@@ -11,8 +12,8 @@ type Session =
   | { status: "error"; message: string };
 type Health = "loading" | "ok" | "error";
 
-// Relative URL: Vite proxies "/api" to the backend in dev; SWA routes it in prod.
-const HEALTH_URL = "/api/health";
+// apiUrl: relative via the Vite proxy in dev, absolute Function App origin in prod (REQ-4.2).
+const HEALTH_URL = apiUrl("/api/health");
 
 export default function App({
   initialError = null,
@@ -27,7 +28,7 @@ export default function App({
   useEffect(() => {
     if (session.status !== "checking") return;
     let cancelled = false;
-    authFetch("/api/me")
+    authFetch(apiUrl("/api/me"))
       .then((res) => {
         if (!res.ok) throw new Error(`unexpected status ${res.status}`);
         return res.json();

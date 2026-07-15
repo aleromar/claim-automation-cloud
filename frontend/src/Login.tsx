@@ -1,6 +1,8 @@
 // Login screen (REQ-1.1): unauthenticated view — no dashboard data.
 // The sign-in control follows Google's branding guidelines (light pill button
-// with the four-colour "G") but stays a plain <a> to /api/auth/login.
+// with the four-colour "G") but stays a plain <a> to the backend login route.
+
+import { apiUrl } from "./api";
 
 const buttonStyle: React.CSSProperties = {
   display: "inline-flex",
@@ -44,7 +46,7 @@ export default function Login({ error }: { error: string | null }) {
   return (
     <main>
       <h1>Claim Automation</h1>
-      <a href="/api/auth/login" style={buttonStyle}>
+      <a href={apiUrl("/api/auth/login")} style={buttonStyle}>
         <GoogleLogo />
         Sign in with Google
       </a>
