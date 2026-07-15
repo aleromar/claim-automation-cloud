@@ -23,5 +23,5 @@ Per-feature specs live in `.specs/{feature}/` (e.g. `.specs/walking-skeleton/spe
 - **Frontend**: npm, TypeScript, Vite, ESLint/Prettier; tests **co-located** (`*.test.tsx`), Vitest.
 - **E2E**: Playwright, real uvicorn + Vite, one cross-stack smoke test.
 - **Task runner**: `make install | dev | test | lint | e2e`.
-- **API paths**: `/api/*` (relative; Vite proxy in dev, SWA route in prod).
+- **API paths**: `/api/*` via `apiUrl()` (relative + Vite proxy in dev; `VITE_API_BASE_URL` prefix in prod).
 - **Simplicity first**; no Docker until a feature needs local Azurite (see structure.md).

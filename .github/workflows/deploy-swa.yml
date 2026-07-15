@@ -1,0 +1,57 @@
+name: deploy-swa
+
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: deploy-swa
+
+env:
+  RESOURCE_GROUP: rg-claim-automation
+  SWA_NAME: swa-claim-automation
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build with the prod API origin (REQ-4.2)
+        working-directory: frontend
+        run: |
+          fa=$(az functionapp list -g "${RESOURCE_GROUP}" --query "[0].name" -o tsv)
+          npm ci
+          VITE_API_BASE_URL="https://${fa}.azurewebsites.net" npm run build
+
+      - name: Fetch SWA deployment token at run time (REQ-3.3 — never stored)
+        id: swa
+        run: |
+          token=$(az staticwebapp secrets list -n "${SWA_NAME}" --query properties.apiKey -o tsv)
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      - uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          action: upload
+          app_location: frontend/dist
+          skip_app_build: true
