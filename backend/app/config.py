@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     frontend_base_url: str = "http://localhost:5173"
     secret_store_backend: Literal["file", "keyvault"] = "file"
     secret_store_file_path: str = ".secrets.json"
+    key_vault_uri: str = ""  # required when secret_store_backend == "keyvault"
     cors_allowed_origin: str | None = None
     jwt_ttl_hours: int = Field(default=8, gt=0)
 

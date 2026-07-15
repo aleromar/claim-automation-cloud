@@ -2,13 +2,17 @@
 
 Local dev = gitignored JSON file (0600, atomic replace) — a file rather than env
 vars because some secrets are runtime-written (Gmail refresh token). Production =
-Key Vault, implemented in the infra feature.
+Key Vault via managed identity (deployment REQ-2).
 """
 
 import json
 import os
 from pathlib import Path
 from typing import Final, Literal, Protocol
+
+from azure.core.exceptions import ResourceNotFoundError
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
 
 from app.config import Settings
 
@@ -48,6 +52,25 @@ class FileSecretStore:
         return json.loads(self._path.read_text())
 
 
+class KeyVaultSecretStore:
+    """Key Vault backend: DefaultAzureCredential = managed identity in Azure, az CLI locally."""
+
+    def __init__(self, vault_uri: str, client: SecretClient | None = None) -> None:
+        self._client = client or SecretClient(
+            vault_url=vault_uri, credential=DefaultAzureCredential()
+        )
+
+    def get(self, name: str) -> str | None:
+        try:
+            return self._client.get_secret(name).value
+        except ResourceNotFoundError:
+            # Absent secret -> None, matching FileSecretStore so require_secret raises uniformly.
+            return None
+
+    def set(self, name: str, value: str) -> None:
+        self._client.set_secret(name, value)
+
+
 def require_secret(store: SecretStore, name: SecretName) -> str:
     """Return the secret or fail loudly — a required secret must never degrade to ""."""
     value = store.get(name)
@@ -63,6 +86,9 @@ def create_secret_store(settings: Settings) -> SecretStore:
     if settings.secret_store_backend == "file":
         return FileSecretStore(settings.secret_store_file_path)
     # "keyvault" is the only other value the Settings type admits.
-    raise NotImplementedError(
-        "keyvault secret store is not implemented in this slice (arrives with the infra feature)"
-    )
+    if not settings.key_vault_uri:
+        raise RuntimeError(
+            "KEY_VAULT_URI is not configured — required when SECRET_STORE_BACKEND=keyvault "
+            "(set by the infra deployment as a Function App setting)"
+        )
+    return KeyVaultSecretStore(settings.key_vault_uri)

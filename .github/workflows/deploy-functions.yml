@@ -1,0 +1,55 @@
+name: deploy-functions
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: deploy-functions
+
+env:
+  RESOURCE_GROUP: rg-claim-automation
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Export requirements.txt for the Oryx remote build
+        working-directory: backend
+        run: uv export --frozen --no-dev --no-emit-project -o requirements.txt
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve Function App name (unique suffix)
+        id: fa
+        run: |
+          name=$(az functionapp list -g "${RESOURCE_GROUP}" --query "[0].name" -o tsv)
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      - uses: Azure/functions-action@bc63708cc6539760eea18d8a7de4ce8ef5fdf593 # v1
+        with:
+          app-name: ${{ steps.fa.outputs.name }}
+          package: backend
+          respect-funcignore: true
+          scm-do-build-during-deployment: true
+          enable-oryx-build: true
+
+      - name: Smoke — health endpoint
+        run: |
+          sleep 30
+          curl --fail --silent --show-error --retry 5 --retry-delay 15 --retry-all-errors \
+            "https://${{ steps.fa.outputs.name }}.azurewebsites.net/api/health"

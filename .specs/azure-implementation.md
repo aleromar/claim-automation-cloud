@@ -37,7 +37,7 @@ Master log lives in `steering/tech.md`; the Azure-relevant ones:
 | Frontend (dashboard) | **Static Web Apps, Free** | 100 GB bandwidth/mo, 1 custom domain | ✅ hosting free (see auth note) |
 | State store | **Table Storage** (in the Functions storage account) | pay-per-use, fractions of a cent | ✅ simplest + cheapest |
 | Secrets | **Key Vault** | no free tier (~$0.03 / 10k ops) | ✅ pennies |
-| Observability | **Application Insights** | first 5 GB/mo free, ~90-day retention | ✅ tiny volume — effectively free |
+| Observability | **Application Insights** (workspace-based → requires a **Log Analytics workspace**) | first 5 GB/mo free, ~90-day retention; workspace capped at 1 GB/day by IaC | ✅ tiny volume — effectively free |
 
 **State store alternatives considered (the tradeoff):** the choice is between *dumb / free /
 zero-latency / weak queries* (Table), *rich queries at the cost of an always-on quota you
@@ -211,6 +211,11 @@ token).
 **Managed identity** lets the Function reach Key Vault + Table Storage with **no stored
 connection strings** — the recommended least-privilege pattern (D14).
 
+**D14 carve-out (2026-07-15, deployment spec Gate 1):** the Functions *runtime* on Linux
+Consumption (Y1) requires key-based `AzureWebJobsStorage` + content-share connection strings —
+identity-based host storage is not supported on Y1. This host plumbing is the sole exception;
+all **application-level** access (Key Vault, Table data) stays managed-identity.
+
 ## Observability & debugging — no volume (D13)
 
 - Consumption instances are **ephemeral** (scale to zero, local disk wiped on recycle), so
@@ -318,7 +323,12 @@ claim-automation-infra/
   the only input that sets OAuth publishing status → token longevity: consumer →
   External/Testing → ~7-day "Reconnect Gmail" cycle; Workspace-you-administer → Internal →
   long-lived tokens. Code is account-agnostic (D16); pure deploy-time console setting.
-- [ ] Region selection — decide at deploy time (latency to Gmail/Trello is negligible;
-  confirm free-tier SKU availability in the chosen region).
+- [x] Region selection — **resolved 2026-07-15 (revised same day): swedencentral** for
+  compute/data, **eastus2** for the SWA metadata record. westeurope was the original
+  choice but Azure rejects it for new subscriptions (`RequestDisallowedByAzure`, "region
+  not accepting new customers"), and northeurope/germanywestcentral/uksouth have zero
+  Y1 (Dynamic) quota on this subscription; SWA's only remaining supported regions are
+  US/East Asia (content is edge-served globally, so user latency is unaffected). See
+  `.specs/deployment/spec.md`.
 - [ ] Whether to split the frontend into its own repo (monorepo for now).
 - [ ] Full metric set beyond the v1 four (expand once dashboard needs are clear).
