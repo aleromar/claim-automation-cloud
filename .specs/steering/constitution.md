@@ -39,8 +39,11 @@ by `product.md` and `tech.md`.
    works.
 
 9. **Spec before code.** This is a spec-driven-dev project. Systems design lives in
-   `.specs/steering/`; each buildable slice gets its own `.specs/{feature}/` spec
-   (requirements → design → tasks) before implementation.
+   `.specs/steering/`; each buildable slice gets its own `.specs/{feature}/spec.md` — a
+   **single-file lite spec** (requirements → design → tasks inline) — before
+   implementation. *(Amended 2026-07-14: lite format is the standard for all features;
+   split into separate requirements/design/tasks files only if a spec.md becomes
+   unwieldy.)*
 
 10. **Triangulated review before implementation.** Before a `.specs/{feature}/` slice moves
     from design to implementation — and whenever steering docs change materially — run the
@@ -53,6 +56,11 @@ by `product.md` and `tech.md`.
     The cross-reference and link checks within this gate are deterministic and MAY later be
     automated in CI (no LLM needed); until such a checker exists they are covered by the
     review above.
+
+11. **Tests before code (TDD).** No implementation code is written without a failing
+    test first — RED → GREEN → REFACTOR. Test tasks precede implementation tasks in every
+    spec; per-stack testing conventions live in `structure.md`. *(Added 2026-07-14: this
+    principle was cited widely as "Article I" but had never been written down.)*
 
 ## Decision authority
 

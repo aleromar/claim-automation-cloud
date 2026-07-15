@@ -97,7 +97,8 @@ Each stack uses its ecosystem's native convention — do not homogenize:
 | Naming | `test_*.py` | `*.test.tsx` |
 | Network | in-process (FastAPI `TestClient`), no real sockets | `fetch` mocked |
 
-- **E2E uses no mocks** — real uvicorn + real Vite + real browser.
+- **E2E uses no mocks** — real uvicorn + real Vite + real browser. (One documented
+  exception: the third-party IdP — see conventions log, 2026-07-14.)
 - **E2E runs chromium only** for now (fastest, matches the deploy target's users); add
   Firefox/WebKit projects only if a cross-browser bug appears.
 - Three layers, three questions: pytest ("does the endpoint return right?"), Vitest ("does the
@@ -136,5 +137,12 @@ add `docker-compose.yml` (Azurite) and move integration/e2e to run against `func
 ## Conventions log
 
 - Co-located frontend tests (`*.test.tsx`) confirmed as the standard (2026-07-10).
+- **E2E "no mocks" — one documented exception:** the third-party IdP (Google) is stubbed
+  in e2e, since Google blocks automated sign-in; real-Google coverage is a manual smoke
+  checklist (see `.specs/auth/spec.md`) (2026-07-14).
+- Dev runtime-written secrets live in a **gitignored local secret file** (0600, atomic
+  writes) behind the SecretStore abstraction — env vars alone can't accept runtime writes
+  (2026-07-14).
 - Relative `/api/*` URLs everywhere; Vite proxy in dev, SWA route in prod.
-- No secrets in the repo; local secrets via gitignored `.env` (future features).
+- No secrets in the repo; local read-only config via gitignored `.env`; runtime-written
+  secrets via the gitignored local secret file (see 2026-07-14 entry above).
