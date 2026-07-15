@@ -1,15 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { consumeFragment } from "./auth";
-
-afterEach(() => {
-  sessionStorage.clear();
-  window.location.hash = "";
-  history.replaceState(null, "", "/");
-  vi.restoreAllMocks();
-});
 
 const OPERATOR = "operator@example.com";
 
@@ -71,6 +64,17 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     mockApi({ me: new Promise<Response>(() => {}) });
     render(<App />);
     expect(screen.getByText(/checking session/i)).toBeInTheDocument();
+  });
+
+  it("shows a clear error when /api/me returns 200 without an email", async () => {
+    storeToken();
+    mockApi({ me: new Response(JSON.stringify({}), { status: 200 }) });
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /session check returned an unexpected response/i,
+      ),
+    );
   });
 });
 

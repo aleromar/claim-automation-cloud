@@ -1,14 +1,7 @@
 // REQ-4: fragment consumption (strip before render), sessionStorage, authFetch.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { authFetch, clearToken, consumeFragment, getToken } from "./auth";
-
-afterEach(() => {
-  sessionStorage.clear();
-  window.location.hash = "";
-  history.replaceState(null, "", "/");
-  vi.restoreAllMocks();
-});
 
 describe("consumeFragment", () => {
   it("moves #token=… into sessionStorage and strips the URL (REQ-4.1)", () => {

@@ -11,21 +11,30 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth_routes import router as auth_router
 from app.config import get_settings
-from app.secret_store import create_secret_store
+from app.secret_store import (
+    GOOGLE_CLIENT_SECRET,
+    SESSION_SIGNING_KEY,
+    create_secret_store,
+    require_secret,
+)
 from app.security import require_operator
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Fail fast if the session signing key is absent (REQ-5.4).
+    """Fail fast if required auth secrets/config are absent (REQ-5.4).
 
-    Never auto-generate it: Consumption scale-out would mint divergent keys.
+    Never auto-generate the signing key: Consumption scale-out would mint
+    divergent keys.
     """
-    store = create_secret_store(get_settings())
-    if store.get("session-signing-key") is None:
+    settings = get_settings()
+    store = create_secret_store(settings)
+    require_secret(store, SESSION_SIGNING_KEY)
+    require_secret(store, GOOGLE_CLIENT_SECRET)
+    if not settings.operator_email:
         raise RuntimeError(
-            "session-signing-key missing from the secret store — seed it before starting "
-            "(dev: see README; prod: infra pipeline)"
+            "OPERATOR_EMAIL is not configured — set it in the environment (dev: .env, "
+            "see backend/README; prod: app settings)"
         )
     yield
 
@@ -41,7 +50,7 @@ if _cors_origin:
         CORSMiddleware,
         allow_origins=[_cors_origin],
         allow_methods=["GET", "POST"],
-        allow_headers=["Authorization"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
 

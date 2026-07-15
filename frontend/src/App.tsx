@@ -3,7 +3,12 @@ import { useEffect, useState } from "react";
 import { authFetch, getToken } from "./auth";
 import Login from "./Login";
 
-type Session = "anonymous" | "checking" | "authed";
+// Discriminated union: the email exists only in the authed state.
+type Session =
+  | { status: "anonymous" }
+  | { status: "checking" }
+  | { status: "authed"; email: string }
+  | { status: "error"; message: string };
 type Health = "loading" | "ok" | "error";
 
 // Relative URL: Vite proxies "/api" to the backend in dev; SWA routes it in prod.
@@ -15,13 +20,12 @@ export default function App({
   initialError?: string | null;
 }) {
   const [session, setSession] = useState<Session>(() =>
-    getToken() ? "checking" : "anonymous",
+    getToken() ? { status: "checking" } : { status: "anonymous" },
   );
-  const [email, setEmail] = useState("");
   const [health, setHealth] = useState<Health>("loading");
 
   useEffect(() => {
-    if (session !== "checking") return;
+    if (session.status !== "checking") return;
     let cancelled = false;
     authFetch("/api/me")
       .then((res) => {
@@ -31,14 +35,19 @@ export default function App({
       .then((body: { email?: string }) => {
         if (cancelled) return;
         if (body.email) {
-          setEmail(body.email);
-          setSession("authed");
+          setSession({ status: "authed", email: body.email });
         } else {
-          setSession("anonymous");
+          // 200 without an email is a broken contract — surface it, don't
+          // silently bounce the operator back to the login screen.
+          setSession({
+            status: "error",
+            message:
+              "Session check returned an unexpected response (no account email).",
+          });
         }
       })
       .catch(() => {
-        if (!cancelled) setSession("anonymous");
+        if (!cancelled) setSession({ status: "anonymous" });
       });
     return () => {
       cancelled = true;
@@ -46,7 +55,7 @@ export default function App({
   }, [session]);
 
   useEffect(() => {
-    if (session !== "authed") return;
+    if (session.status !== "authed") return;
     let cancelled = false;
     authFetch(HEALTH_URL)
       .then((res) => {
@@ -64,8 +73,8 @@ export default function App({
     };
   }, [session]);
 
-  if (session === "anonymous") return <Login error={initialError} />;
-  if (session === "checking") {
+  if (session.status === "anonymous") return <Login error={initialError} />;
+  if (session.status === "checking") {
     return (
       <main>
         <h1>Claim Automation</h1>
@@ -73,10 +82,18 @@ export default function App({
       </main>
     );
   }
+  if (session.status === "error") {
+    return (
+      <main>
+        <h1>Claim Automation</h1>
+        <p role="alert">⚠️ {session.message}</p>
+      </main>
+    );
+  }
   return (
     <main>
       <h1>Claim Automation</h1>
-      <p>{email}</p>
+      <p>{session.email}</p>
       {health === "loading" && <p>Checking backend…</p>}
       {health === "ok" && <p>✅ All good</p>}
       {health === "error" && <p>⚠️ Backend unavailable</p>}

@@ -8,15 +8,22 @@ Key Vault, implemented in the infra feature.
 import json
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Final, Literal, Protocol
 
 from app.config import Settings
 
+SESSION_SIGNING_KEY: Final = "session-signing-key"
+GOOGLE_CLIENT_SECRET: Final = "google-client-secret"
+GMAIL_REFRESH_TOKEN: Final = "gmail-refresh-token"
+
+# Closed set of secret names: a typo becomes a type error, not a silent None.
+SecretName = Literal["session-signing-key", "google-client-secret", "gmail-refresh-token"]
+
 
 class SecretStore(Protocol):
-    def get(self, name: str) -> str | None: ...
+    def get(self, name: SecretName) -> str | None: ...
 
-    def set(self, name: str, value: str) -> None: ...
+    def set(self, name: SecretName, value: str) -> None: ...
 
 
 class FileSecretStore:
@@ -39,6 +46,17 @@ class FileSecretStore:
         if not self._path.exists():
             return {}
         return json.loads(self._path.read_text())
+
+
+def require_secret(store: SecretStore, name: SecretName) -> str:
+    """Return the secret or fail loudly — a required secret must never degrade to ""."""
+    value = store.get(name)
+    if not value:
+        raise RuntimeError(
+            f"{name} missing from the secret store — seed it before starting "
+            "(dev: make seed-dev, see backend/README; prod: infra pipeline)"
+        )
+    return value
 
 
 def create_secret_store(settings: Settings) -> SecretStore:

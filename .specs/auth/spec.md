@@ -1,6 +1,6 @@
 # Spec: Authentication (Google OAuth broker + JWT-gated dashboard)
 
-> **Created:** 2026-07-11 · **Updated:** 2026-07-14 (implemented)
+> **Created:** 2026-07-11 · **Updated:** 2026-07-15 (latent-gap note, doc-only)
 > **Status:** Complete — Gate 2 verdict ALIGNED (2026-07-14); manual real-Google smoke
 > deferred to deploy time
 > **Mode:** Lite (single-file spec per constitution P9, amended 2026-07-14)
@@ -105,6 +105,8 @@ tab.
    authenticated view.
 3. WHEN any API call returns `401`
    THE SYSTEM SHALL clear the stored JWT and render the login screen.
+   *(Render-login is currently wired per-call-site, not centrally — see the "Known
+   latent gap" note under Non-Functional / Security.)*
 4. WHEN the SPA loads with `#error=…`
    THE SYSTEM SHALL show the login screen with a generic "This account is not authorized"
    / "Login failed" message.
@@ -123,11 +125,13 @@ tab.
 3. WHEN configured with backend `keyvault`
    THE SYSTEM SHALL fail fast with "not implemented in this slice" (class arrives with
    the infra feature).
-4. WHEN the backend starts and the session signing key is absent from the secret store
-   THE SYSTEM SHALL fail fast at startup with a clear error — the key (≥32 random bytes)
-   is seeded by an explicit developer action in dev (`make seed-dev`) / by the infra
-   pipeline in prod. Never auto-generated *at startup* (Consumption scale-out would mint
-   divergent keys → random 401s).
+4. WHEN the backend starts and the session signing key, the Google client secret, or the
+   operator email is absent
+   THE SYSTEM SHALL fail fast at startup with a clear error — seeded by an explicit
+   developer action in dev (`make seed-dev` + `.env`) / by the infra pipeline in prod.
+   The signing key (≥32 random bytes) is never auto-generated *at startup* (Consumption
+   scale-out would mint divergent keys → random 401s). *(Amended 2026-07-15: originally
+   signing-key only; extended so a missing secret can never degrade silently.)*
 
 ### REQ-6: Cross-stack E2E via stub IdP
 
@@ -176,6 +180,21 @@ PR.
   sessions outside the REQ-2.5 gate (e.g. Reconnect Gmail). At that point add a
   `SameSite=Lax` HttpOnly nonce cookie binding (login sets, callback verifies) — Lax,
   not Strict: the callback is a top-level cross-site GET from Google.
+- **Known latent gap — 401→login not centralized (gotcha):** REQ-4.3 has two halves and
+  only one is centralized. `authFetch` clears the stored JWT on any 401
+  (`frontend/src/auth.ts`), but rendering the login screen only happens in the `/api/me`
+  effect (`App.tsx` sets `session = "anonymous"` on failure); the health effect just sets
+  its local error state. Not a bug today: the SPA's only other call is `/api/health`,
+  which is public (REQ-3.3 keeps it unauthenticated), so no reachable path returns 401
+  without landing on Login. **Revisit trigger:** the first protected dashboard endpoint.
+  If it is called via `authFetch` without centralizing the session transition, an expired
+  token mid-session strands the operator on an authenticated-looking dashboard with no
+  token (only a refresh recovers). Fix when triggered: move the 401→`anonymous`
+  transition next to the token clearing (e.g. an `onUnauthorized` callback registered by
+  `App`, or a hook wrapping `authFetch` that owns the session state), so future call
+  sites get REQ-4.3 for free. Per constitution P11, that fix starts RED: a Vitest test
+  reproducing the stranded session (401 from a non-`/api/me` call while `authed` → must
+  render Login) precedes the implementation.
 
 ---
 
@@ -185,19 +204,19 @@ PR.
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Settings | `app/config.py` | pydantic-settings behind a **cached `get_settings()`** (so module import never explodes; tests override via env/fixture — existing `conftest.py` imports `app.main` at collection time): `GOOGLE_CLIENT_ID`, `GOOGLE_AUTH_URL`*, `GOOGLE_TOKEN_URL`*, `OAUTH_REDIRECT_URI`, `ALLOWLIST_EMAIL`, `FRONTEND_BASE_URL`, `SECRET_STORE_BACKEND` (`file`\|`keyvault`), `SECRET_STORE_FILE_PATH`, `CORS_ALLOWED_ORIGIN?`, `JWT_TTL_HOURS=8`. *default to real Google URLs |
+| Settings | `app/config.py` | pydantic-settings behind a **cached `get_settings()`** (so module import never explodes; tests override via env/fixture — existing `conftest.py` imports `app.main` at collection time): `GOOGLE_CLIENT_ID`, `GOOGLE_AUTH_URL`*, `GOOGLE_TOKEN_URL`*, `OAUTH_REDIRECT_URI`, `OPERATOR_EMAIL`, `FRONTEND_BASE_URL`, `SECRET_STORE_BACKEND` (`file`\|`keyvault`), `SECRET_STORE_FILE_PATH`, `CORS_ALLOWED_ORIGIN?`, `JWT_TTL_HOURS=8`. *default to real Google URLs |
 | SecretStore | `app/secret_store.py` | `SecretStore` protocol (`get`/`set`) · `FileSecretStore` (JSON, 0600, atomic replace) · `create_secret_store(settings)` factory; `keyvault` → `NotImplementedError`. Keys: `google-client-secret`, `gmail-refresh-token`, `session-signing-key` |
 | Security | `app/security.py` | `make_state`/`verify_state` (HMAC-SHA256 over `"state:" + nonce.timestamp` — domain-separated from JWT use of the same key; 10-min window) · `mint_session_jwt`/`verify_session_jwt` (PyJWT, pinned `algorithms=["HS256"]`, claims `email`,`iat`,`exp`) · `require_operator` FastAPI dependency (verify + allowlist) |
 | Auth routes | `app/auth_routes.py` | `GET /api/auth/login` → 302 to authorize URL · `GET /api/auth/callback` → REQ-2 logic; code exchange via `httpx`. **id_token claim checks are explicit**: PyJWT with `verify_signature: False` also disables `exp`/`aud`/`iss` verification by default — compare `iss`, `aud`, `exp` manually (or pass explicit verify options); a naive decode would silently no-op |
-| App wiring | `app/main.py` | include router · `GET /api/me` (uses `require_operator`) · CORS middleware iff origin configured · startup (lifespan) fail-fast signing-key check |
+| App wiring | `app/main.py` | include router · `GET /api/me` (uses `require_operator`) · CORS middleware iff origin configured · startup (lifespan) fail-fast check: signing key, client secret, `OPERATOR_EMAIL` |
 
-New backend deps: `pydantic-settings`, `PyJWT`, `httpx` (already via TestClient? add explicitly); dev: `respx` (httpx mocking).
+New backend deps: `pydantic-settings`, `PyJWT`, `httpx` (runtime dependency — the callback calls the token endpoint); dev: `respx` (httpx mocking).
 
 ### Components (frontend — `frontend/src/`)
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Token store | `src/auth.ts` | `consumeFragment()` (runs before render: token→sessionStorage / error→state, strips URL via `history.replaceState`) · `getToken`/`clearToken` · `authFetch` (adds Bearer; on 401 clears + signals logout) |
+| Token store | `src/auth.ts` | `consumeFragment()` (runs before render: token→sessionStorage / error→state, strips URL via `history.replaceState`) · `getToken`/`clearToken` · `authFetch` (adds Bearer; on 401 clears the token — the login transition lives in App's `/api/me` effect, see Known latent gap under Non-Functional / Security) |
 | Login screen | `src/Login.tsx` | Sign-in button → `window.location = "/api/auth/login"`; renders generic error from fragment |
 | App shell | `src/App.tsx` | conditional render (no router): token → probe `/api/me` → dashboard (email + existing health view); else Login |
 
@@ -218,7 +237,7 @@ sequenceDiagram
     Note over F: verify state HMAC with session-signing-key<br/>(10-min window)
     F->>G: POST token endpoint<br/>(AUTH_CODE + client_id + client_secret ← SecretStore)
     G-->>F: id_token (iss, aud, exp, email)<br/>+ access_token (+ refresh_token — only guaranteed<br/>on FIRST consent, may be absent on repeat grants)
-    Note over F: validate id_token iss/aud/exp,<br/>email == ALLOWLIST_EMAIL
+    Note over F: validate id_token iss/aud/exp,<br/>email == OPERATOR_EMAIL
     alt refresh_token in response
         F->>F: SecretStore.set(gmail-refresh-token ← refresh_token)
     else absent (repeat grant, REQ-2.3)
@@ -228,7 +247,7 @@ sequenceDiagram
     F-->>B: 302 → FRONTEND_BASE_URL#token=SESSION_JWT
     B->>B: consumeFragment → sessionStorage, strip URL
     B->>F: GET /api/me (Authorization: Bearer SESSION_JWT)
-    Note over F: verify JWT sig (HS256 pinned, session-signing-key),<br/>expiry, email == allowlist
+    Note over F: verify JWT sig (HS256 pinned, session-signing-key),<br/>expiry, email == OPERATOR_EMAIL
     F-->>B: 200 {email}
 ```
 
@@ -238,7 +257,7 @@ sequenceDiagram
 |-------|-------|--------|
 | pytest (unit) | `backend/tests/unit/` | secret store; state + JWT (incl. alg pinning, expiry, tamper, allowlist claim); auth routes with `respx`-mocked token endpoint (all REQ-2 branches); startup fail-fast |
 | Vitest | co-located `frontend/src/*.test.ts(x)` | fragment consumption/stripping; Login render + error; App auth states + 401 transition (fetch mocked) |
-| Playwright e2e | `e2e/tests/` | full flow vs **stub IdP** (small Node http server started via a third Playwright `webServer` entry). Concrete wiring: the backend `webServer` entry gets explicit `env` (`GOOGLE_AUTH_URL`/`GOOGLE_TOKEN_URL` → stub, `SECRET_STORE_BACKEND=file`, `SECRET_STORE_FILE_PATH=e2e/.tmp/secrets.json` — a **fixed gitignored path** all processes agree on, `FRONTEND_BASE_URL`, `ALLOWLIST_EMAIL`, `OAUTH_REDIRECT_URI`) and a seed-then-start command (`seed script && uvicorn …`) so the signing key + client secret exist before startup fail-fast runs; `reuseExistingServer` **disabled for the backend entry** (a reused dev uvicorn lacks stub env → local flake). The existing `health.spec.ts` asserts "All good" on an unauthenticated page load — it **must be reworked**: the page now shows the login screen; API liveness is asserted via a direct `request.get('/api/health')` |
+| Playwright e2e | `e2e/tests/` | full flow vs **stub IdP** (small Node http server started via a third Playwright `webServer` entry). Concrete wiring: the backend `webServer` entry gets explicit `env` (`GOOGLE_AUTH_URL`/`GOOGLE_TOKEN_URL` → stub, `SECRET_STORE_BACKEND=file`, `SECRET_STORE_FILE_PATH=e2e/.tmp/secrets.json` — a **fixed gitignored path** all processes agree on, `FRONTEND_BASE_URL`, `OPERATOR_EMAIL`, `OAUTH_REDIRECT_URI`) and a seed-then-start command (`seed script && uvicorn …`) so the signing key + client secret exist before startup fail-fast runs; `reuseExistingServer` **disabled for the backend entry** (a reused dev uvicorn lacks stub env → local flake). The existing `health.spec.ts` asserts "All good" on an unauthenticated page load — it **must be reworked**: the page now shows the login screen; API liveness is asserted via a direct `request.get('/api/health')` |
 | Manual smoke | checklist below | real Google, prod origins |
 
 E2E convention amendment: "E2E uses no mocks" gains one documented exception — the
@@ -274,8 +293,8 @@ conventions log.
 
 ### Post-implementation checklist
 
-- [x] `make test` (pytest 49 + Vitest 20) and `make e2e` (6) green; `make lint` clean
-      (2026-07-14)
+- [x] `make test` (pytest 49 + Vitest 21) and `make e2e` (6) green; `make lint` clean
+      (2026-07-14; re-verified after PR #1 review triage 2026-07-15)
 - [x] REQ-1…6 each verified by the tests named in tasks 1–9
 - [x] Constitution §5: no real secret values in repo (e2e seed values are test fixtures);
       the new code adds no logging, so nothing can log secrets
@@ -293,6 +312,16 @@ conventions log.
 
 - **Grilled 2026-07-11:** full-broker scope; 8h JWT; sessionStorage; no logout; Reconnect
   deferred; SecretStore file/keyvault factory; stub IdP + manual smoke.
+- **PR #1 review triage 2026-07-15** (7-agent comprehensive review, operator-decided):
+  `httpx` promoted to runtime dep; startup fail-fast extended to `google-client-secret` +
+  `OPERATOR_EMAIL` and every `or ""` secret fallback replaced by a loud `require_secret`
+  (fail fast over silent degradation); informative `logger.warning` on all callback
+  rejection paths (generic redirect to the browser stays); `ALLOWLIST_EMAIL` renamed
+  `OPERATOR_EMAIL` (it is a single email, not a list); secret names typed as a `Literal`;
+  `JWT_TTL_HOURS` bounded `> 0`; SPA session state made a discriminated union and a 200
+  `/api/me` without an email now shows an explicit error instead of the login screen;
+  CORS `allow_headers` gained `Content-Type` (POST was already advertised); redundant
+  route-level JWT-mode tests and the duplicate health test removed.
 - **Review triage 2026-07-14** (steering-compliance + devils-advocate critics): added
   per-request allowlist claim check; stateless HMAC `state`; signing-key fail-fast
   bootstrap; alg pinning + claim requirements; client_secret via SecretStore; denied
@@ -315,3 +344,13 @@ conventions log.
   cookies); cross-referenced D17/D21; added per-identity-token-storage / non-REQ-2.5
   minting flows as a second revisit trigger. Risk acceptance **signed off by the
   operator 2026-07-14** (§10: the gate flags, a human decides).
+- **§10 gate 2026-07-15** (doc-only; 3 critics: cross-reference, contradiction,
+  constitution): recorded the **known latent gap — 401→login not centralized**
+  (REQ-4.3's render-login half wired only for `/api/me`; behaviorally satisfied today
+  because `/api/health` is public, so no reachable 401 misses Login; revisit trigger =
+  first protected dashboard endpoint). Fixed per critics: REQ-3.4→REQ-3.3 citation;
+  pointer added at REQ-4.3; stale components-table cell ("signals logout" — code only
+  clears the token); P11 test-first clause added to the triggered fix; Updated date
+  bumped. Noted: the post-implementation checklist's "REQ-1…6 verified" now reads as
+  "on all reachable paths" for REQ-4.3. Accept-and-defer **decided by the operator
+  2026-07-15** (chose capturing the gotcha over fixing preemptively).
