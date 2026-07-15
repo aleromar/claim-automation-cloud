@@ -8,7 +8,7 @@ laptop app. This is a **spec-driven-dev** project.
 
 Authoritative project context lives in `.specs/steering/` — read before any work:
 
-- [constitution.md](.specs/steering/constitution.md) — governance rules (MUST/MUST NOT). Article I: **tests before code**.
+- [constitution.md](.specs/steering/constitution.md) — governance rules (MUST/MUST NOT). Principle 11: **tests before code**.
 - [product.md](.specs/steering/product.md) — what this is, actors, capabilities, scope.
 - [tech.md](.specs/steering/tech.md) — architecture, building blocks, decision log (D1–D26).
 - [structure.md](.specs/steering/structure.md) — **repo layout, toolchain, testing & coding conventions**.
