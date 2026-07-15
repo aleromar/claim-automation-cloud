@@ -323,7 +323,11 @@ claim-automation-infra/
   the only input that sets OAuth publishing status → token longevity: consumer →
   External/Testing → ~7-day "Reconnect Gmail" cycle; Workspace-you-administer → Internal →
   long-lived tokens. Code is account-agnostic (D16); pure deploy-time console setting.
-- [x] Region selection — **resolved 2026-07-15: westeurope** (SWA Free available; closest
-  SWA region to CH). See `.specs/deployment/spec.md`.
+- [x] Region selection — **resolved 2026-07-15 (revised same day): northeurope** for
+  compute/data, **eastus2** for the SWA metadata record. westeurope was the original
+  choice but Azure rejects it for new subscriptions (`RequestDisallowedByAzure`, "region
+  not accepting new customers"); SWA's only remaining supported regions are US/East Asia
+  (content is edge-served globally, so user latency is unaffected). See
+  `.specs/deployment/spec.md`.
 - [ ] Whether to split the frontend into its own repo (monorepo for now).
 - [ ] Full metric set beyond the v1 four (expand once dashboard needs are clear).

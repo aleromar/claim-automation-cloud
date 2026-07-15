@@ -21,7 +21,7 @@ Deploy-time decisions resolved this session:
 | Item | Decision |
 |------|----------|
 | Subscription | **Personal free-tier account** (personal tenant, not the work tenant) |
-| Region | **westeurope** (SWA Free available; closest to CH) |
+| Region | **northeurope** + **eastus2** for the SWA metadata record. **[REVISED 2026-07-15 during Task 12: westeurope rejects new subscriptions (`RequestDisallowedByAzure`); SWA's supported-region list excludes all other EU regions — its content is edge-served globally, so only management metadata lives in eastus2. User-approved.]** Original: westeurope (closest to CH). |
 | Resource group | `rg-claim-automation` |
 | Infra repo | `aleromar/claim-automation-infra`, **private** |
 | App repo | `aleromar/claim-automation-cloud` (public, already exists) |
