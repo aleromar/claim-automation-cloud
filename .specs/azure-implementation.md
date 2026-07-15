@@ -125,7 +125,8 @@ Because the operator **is** the mailbox owner, a single **Google OAuth** flow pr
 dashboard identity and Gmail scopes:
 
 - **We** own the Google OAuth client (`client_id` + `client_secret`); the operator never
-  handles it — they click **"Connect Google"** and consent (a big UX win over the original,
+  handles it — they click **"Sign in with Google"** and consent once (D18: login and Gmail
+  grant are one consent; there is no separate "Connect Google" step) (a big UX win over the original,
   where the user had to create a GCP project and download `client_secret.json`).
 - The flow is handled by **our own Function HTTP endpoint** (OAuth callback), which stores
   the resulting **refresh token** in Key Vault.
@@ -145,8 +146,8 @@ JWT signature + expiry + allowlisted email** — a stateless check, no session s
 
 Login → API request flow:
 
-1. Operator clicks **Login** → browser hits backend `/auth/login` → redirect to Google → consent.
-2. Google redirects to backend `/auth/callback?code=…`. Backend exchanges the code:
+1. Operator clicks **Login** → browser hits backend `/api/auth/login` → redirect to Google → consent.
+2. Google redirects to backend `/api/auth/callback?code=…`. Backend exchanges the code:
    **Gmail refresh token → Key Vault**; **id_token → verify email against the single-email
    allowlist (D17)**.
 3. Backend mints a short-lived **session JWT** (signed with the session key) and returns it
@@ -236,10 +237,11 @@ Run and debug the whole pipeline locally without touching Azure.
 |---------------|------------------|-----|
 | Table Storage | **Azurite** (`mcr.microsoft.com/azure-storage/azurite`) | Docker; connect via `UseDevelopmentStorage=true` — same SDK, no code branch |
 | Functions | **Azure Functions Core Tools** (`func start`) | on host, or the Functions Docker base image |
-| Key Vault | **`.env` / `local.settings.json`** | one secret-access interface: local → env, cloud → Key Vault |
+| Key Vault | **gitignored local secret file** (SecretStore `file` backend) + `.env` for read-only config | one secret-access interface (`SecretStore`): local → file, cloud → Key Vault; a file (not env) because some secrets are runtime-*written* (Gmail refresh token) — see `.specs/auth/spec.md` |
 | App Insights | **console/stdout** | Python `logging` prints locally |
 
-Dev loop: `docker compose up` (Azurite) + `func start`, secrets from a gitignored `.env`.
+Dev loop: `docker compose up` (Azurite) + `func start`, config from a gitignored `.env`,
+runtime-written secrets in the gitignored local secret file.
 Mirrors the existing forecasting-api setup (postgres + azurite). Postgres only enters if we
 later switch to a relational store.
 
