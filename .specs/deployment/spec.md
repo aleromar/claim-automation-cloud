@@ -92,7 +92,10 @@ violating azure-implementation.md's own public-repo mitigations.]**
    environment** — holding only RG-scoped deploy rights (**Reader** on the resource group,
    used by the deploy workflows to discover the unique Function App name, + **Website
    Contributor** on the Function App + **Contributor on the Static Web App** for token
-   retrieval).
+   retrieval). **[REVISED 2026-07-16: the Function App name is a deterministic
+   `uniqueString()` hash, so it is pinned as `FUNCTIONAPP_NAME` in both deploy workflows
+   and runtime discovery via `az functionapp list` is removed — Reader on the RG is no
+   longer needed for discovery (user request, post-review).]**
 3. THE SYSTEM SHALL store no client secret, publish profile, or long-lived SWA token in
    GitHub secrets; the SWA deployment token SHALL be fetched at run time
    (`az staticwebapp secrets list`) after OIDC login.
