@@ -56,7 +56,8 @@ environment is reproducible and reviewable.
 
 **Test coverage:** pytest assertions over compiled ARM JSON (`bicep build` output) in
 `claim-automation-infra/tests/`, **scoped to cost/security invariants** (SKUs Y1/Free/LRS,
-budget amount, TLS floor, RBAC role IDs, Log Analytics daily cap); live `what-if` in CI.
+budget amount, TLS floor, RBAC role IDs, Log Analytics daily cap) **plus live-incident
+regression guards from the Bugfix log** (e.g., #6 platform CORS); live `what-if` in CI.
 
 ### REQ-2: KeyVaultSecretStore (production secret backend)
 
@@ -170,7 +171,7 @@ first; acceptable for a single long-lived environment.
 claim-automation-infra/
   main.bicep                # subscription-scope: RG + module
   modules/resources.bicep   # RG-scope: everything else + RBAC + outputs
-  tests/test_compiled_arm.py# pytest over `az bicep build` JSON — cost/security invariants only
+  tests/test_compiled_arm.py# pytest over `az bicep build` JSON — cost/security + Bugfix-log regression invariants
   scripts/bootstrap-oidc.sh # one-time: 2 app registrations, federated creds, RBAC, gh secrets
   .github/workflows/deploy.yml  # PR: build+tests+what-if · main: deploy + seed secrets
   pyproject.toml            # uv; pytest only
@@ -260,6 +261,7 @@ Decision changes forced by the environment (region, OIDC identity split) live as
 | 3 | Every route 404; `az functionapp function list` empty | `backend/host.json` was never committed — the Functions host indexes nothing without it. Invisible locally: dev and e2e run uvicorn directly, so Azure hosting was first exercised live | PR #3 (`d257f1b`): add `host.json` incl. the NFR's adaptive sampling | `test_function_host.py` (exists, v2 schema, sampling on) |
 | 4 | Still 404; App Insights: `ModuleNotFoundError: No module named 'fastapi'` | On **Linux Consumption + RBAC**, `functions-action` forces `WEBSITE_RUN_FROM_PACKAGE` and silently ignores `scm-do-build-during-deployment`/`enable-oryx-build` — no remote build ever ran, so the package shipped without dependencies | PR #4 (`207d4c4`): vendor deps in CI into `.python_packages/lib/site-packages`; drop the dead Oryx inputs | deploy workflow's health smoke; actionlint |
 | 5 | 503 `Function host is not running`; exceptions: `RoutePatternException` on template `api//{*route}` | [Worker bug #1310](https://github.com/Azure/azure-functions-python-worker/issues/1310): `AsgiFunctionApp` registers its catch-all as `/{*route}` (leading slash), so any non-empty `routePrefix` composes an invalid double slash | PR #4 (`84ca909`): `routePrefix: ""` in host.json — FastAPI already declares `/api/*` itself, public URLs unchanged | `test_host_json_empties_route_prefix` |
+| 6 | Sign-in "does nothing": OAuth round trip completes (login+callback 302s, token minted), yet the SPA lands back on the login screen — no error in the UI, App Insights, or worker logs | The Functions host answers cross-origin `OPTIONS` preflights from **platform** CORS config and never forwards them to the worker — the FastAPI CORS middleware (D22) is unreachable for preflights. Empty platform allowlist ⇒ bare `204` without `Access-Control-Allow-*`, so the browser drops the `/api/me` fetch; the SPA's catch treats it as "not signed in". Triply silent: preflight never reaches the app (no telemetry), CORS failures are opaque to page JS, and the login fallback swallows the throw | infra PR #2: `siteConfig.cors.allowedOrigins = [SWA origin]` in `resources.bicep` (hotfixed live first via `az functionapp cors add`) | infra `test_function_app_platform_cors_matches_app_origin` — platform allowlist must exist and match `CORS_ALLOWED_ORIGIN`; D22 amended |
 
 ## Out of Scope
 

@@ -44,6 +44,8 @@ app.include_router(auth_router)
 
 # Prod only: SWA and Function App are different origins (D22). Unset in dev
 # (Vite proxy is same-origin), so this is decided once at process start.
+# Not sufficient alone in prod: the Functions host answers OPTIONS preflights
+# from the platform CORS allowlist (see D22 amendment / deployment Bugfix #6).
 _cors_origin = get_settings().cors_allowed_origin
 if _cors_origin:
     app.add_middleware(
