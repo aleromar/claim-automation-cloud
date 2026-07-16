@@ -241,6 +241,20 @@ topology (CORS + absolute URL) is covered by the post-deploy manual smoke (step 
 | 12 | Live verification: provision, deploy, hit `/api/health`, load SWA, login smoke | VERIFY | both | all |
 | 13 | Docs: amend structure.md (3 spots, VITE_API_BASE_URL), azure-implementation.md (Log Analytics row, D14 carve-out, region=westeurope), tech.md block-13 stale row | DOC | app | — |
 
+## Bugfix log
+
+Defects found during first live execution (Tasks 9–12): built as designed, failed live.
+Decision changes forced by the environment (region, OIDC identity split) live as
+`[REVISED]` markers above; this table is defects only.
+
+| # | Symptom | Root cause | Fix | Guard |
+|---|---------|-----------|-----|-------|
+| 1 | Infra CI OIDC login rejected: `AADSTS700213: No matching federated identity record` | GitHub enforces immutable ID-embedded OIDC subjects (`repo:owner@id/repo@id:…`) for repos created on/after **2026-07-15** — the infra repo's creation day. Name-only federated subjects stopped matching. | infra `280ad8a`: bootstrap script now derives each repo's `sub_claim_prefix` from the GitHub API and updates existing federated credentials on drift | Idempotent bootstrap re-run heals drift; every `deploy.yml` run exercises the login |
+| 2 | Local probes failed `SubscriptionNotFound`; first deploy attempt would have too | Brand-new subscription had **no resource providers registered** (Microsoft.Storage/Web/KeyVault/OperationalInsights/Insights) | one-time admin `az provider register` for the five providers (not CI's job — its identity is least-privilege) | PR-path `what-if`/validate now passes preflight |
+| 3 | Every route 404; `az functionapp function list` empty | `backend/host.json` was never committed — the Functions host indexes nothing without it. Invisible locally: dev and e2e run uvicorn directly, so Azure hosting was first exercised live | PR #3 (`d257f1b`): add `host.json` incl. the NFR's adaptive sampling | `test_function_host.py` (exists, v2 schema, sampling on) |
+| 4 | Still 404; App Insights: `ModuleNotFoundError: No module named 'fastapi'` | On **Linux Consumption + RBAC**, `functions-action` forces `WEBSITE_RUN_FROM_PACKAGE` and silently ignores `scm-do-build-during-deployment`/`enable-oryx-build` — no remote build ever ran, so the package shipped without dependencies | PR #4 (`207d4c4`): vendor deps in CI into `.python_packages/lib/site-packages`; drop the dead Oryx inputs | deploy workflow's health smoke; actionlint |
+| 5 | 503 `Function host is not running`; exceptions: `RoutePatternException` on template `api//{*route}` | [Worker bug #1310](https://github.com/Azure/azure-functions-python-worker/issues/1310): `AsgiFunctionApp` registers its catch-all as `/{*route}` (leading slash), so any non-empty `routePrefix` composes an invalid double slash | PR #4 (`84ca909`): `routePrefix: ""` in host.json — FastAPI already declares `/api/*` itself, public URLs unchanged | `test_host_json_empties_route_prefix` |
+
 ## Out of Scope
 
 - Timer trigger / pipeline worker (own feature; infra hosts it when it arrives)
