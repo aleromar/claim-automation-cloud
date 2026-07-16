@@ -323,6 +323,12 @@ claim-automation-infra/
   the only input that sets OAuth publishing status → token longevity: consumer →
   External/Testing → ~7-day "Reconnect Gmail" cycle; Workspace-you-administer → Internal →
   long-lived tokens. Code is account-agnostic (D16); pure deploy-time console setting.
+- [ ] **Multi-customer (if ever): the single OAuth client is reused, not multiplied.**
+  Consent is per-user against the one client we own (D16/D18) — a new customer never
+  needs a new client ID/secret. What would change: `OPERATOR_EMAIL` allowlist → customer
+  table, the single `gmail-refresh-token` secret → per-customer token storage, and the
+  client goes through Google app verification once (Testing mode caps at 100 test users
+  with ~7-day tokens). Out of scope for v1 (single operator, D17/D25).
 - [x] Region selection — **resolved 2026-07-15 (revised same day): swedencentral** for
   compute/data, **eastus2** for the SWA metadata record. westeurope was the original
   choice but Azure rejects it for new subscriptions (`RequestDisallowedByAzure`, "region
