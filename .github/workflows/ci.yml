@@ -34,7 +34,10 @@ jobs:
         run: |
           uv run ruff check .
           uv run ruff format --check .
-      - name: Unit tests (pytest)
+      - name: Start Azurite (make azurite)
+        run: make azurite
+        working-directory: ${{ github.workspace }}
+      - name: Tests (pytest — unit + integration vs Azurite)
         run: uv run pytest
 
   frontend:
