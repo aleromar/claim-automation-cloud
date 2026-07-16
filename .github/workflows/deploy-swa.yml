@@ -12,9 +12,11 @@ permissions:
 
 concurrency: deploy-swa
 
+# FUNCTIONAPP_NAME's suffix is bicep uniqueString() — a deterministic hash of
+# subscription + RG, so the name is stable; update only if re-provisioned elsewhere.
 env:
-  RESOURCE_GROUP: rg-claim-automation
   SWA_NAME: swa-claim-automation
+  FUNCTIONAPP_NAME: func-claim-automation-f3q5hnwb6i5wk
 
 jobs:
   deploy:
@@ -38,9 +40,8 @@ jobs:
       - name: Build with the prod API origin (REQ-4.2)
         working-directory: frontend
         run: |
-          fa=$(az functionapp list -g "${RESOURCE_GROUP}" --query "[0].name" -o tsv)
           npm ci
-          VITE_API_BASE_URL="https://${fa}.azurewebsites.net" npm run build
+          VITE_API_BASE_URL="https://${FUNCTIONAPP_NAME}.azurewebsites.net" npm run build
 
       - name: Fetch SWA deployment token at run time (REQ-3.3 — never stored)
         id: swa

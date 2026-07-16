@@ -4,6 +4,6 @@
 // cross-origin — D22), so every call site stays origin-agnostic.
 
 export function apiUrl(path: string): string {
-  const base = (import.meta.env.VITE_API_BASE_URL ?? "") as string;
+  const base = import.meta.env.VITE_API_BASE_URL ?? "";
   return base.replace(/\/$/, "") + path;
 }

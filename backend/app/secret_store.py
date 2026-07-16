@@ -85,10 +85,7 @@ def require_secret(store: SecretStore, name: SecretName) -> str:
 def create_secret_store(settings: Settings) -> SecretStore:
     if settings.secret_store_backend == "file":
         return FileSecretStore(settings.secret_store_file_path)
-    # "keyvault" is the only other value the Settings type admits.
-    if not settings.key_vault_uri:
-        raise RuntimeError(
-            "KEY_VAULT_URI is not configured — required when SECRET_STORE_BACKEND=keyvault "
-            "(set by the infra deployment as a Function App setting)"
-        )
+    # "keyvault" is the only other value the Settings type admits, and its
+    # model validator guarantees the URI is set.
+    assert settings.key_vault_uri
     return KeyVaultSecretStore(settings.key_vault_uri)
