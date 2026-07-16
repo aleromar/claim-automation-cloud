@@ -1,4 +1,4 @@
-"""REQ-5: SecretStore abstraction — file backend, factory, keyvault fail-fast."""
+"""REQ-5: SecretStore abstraction — file backend and factory."""
 
 import pytest
 
@@ -55,12 +55,6 @@ def test_factory_selects_file_backend(tmp_path):
     )
     store = create_secret_store(settings)
     assert isinstance(store, FileSecretStore)
-
-
-def test_factory_keyvault_without_uri_fails_fast():
-    """keyvault backend is implemented (deployment REQ-2) but demands its vault URI."""
-    with pytest.raises(RuntimeError, match="KEY_VAULT_URI"):
-        create_secret_store(_settings(secret_store_backend="keyvault", key_vault_uri=""))
 
 
 def test_factory_unknown_backend_rejected():

@@ -290,8 +290,9 @@ Decision changes forced by the environment (region, OIDC identity split) live as
 - [x] `[RESOLVED ASSUMPTION-3]` Deploy triggers confirmed: app on push to `main`
   (path-filtered, `production` environment); infra on push to infra `main` +
   `workflow_dispatch` (user, 2026-07-15).
-- [x] `[RESOLVED]` Subscription = personal free account; region = westeurope (user,
-  2026-07-15).
+- [x] `[RESOLVED]` Subscription = personal free account; region = swedencentral +
+  eastus2 for the SWA metadata record **[REVISED 2026-07-15 during Task 12 — see the
+  Region row of the decision table]**. Original: westeurope (user, 2026-07-15).
 - [x] `[RESOLVED]` Gate 1 (P10) ran 2026-07-15: 4 critics → 5 critical fixes applied
   (split OIDC identities; D14 host-storage carve-out; CI KV data-plane role; PR federated
   credential; lint TEST tasks). No project files may contain the user's employer name

@@ -7,7 +7,7 @@ collection time; real deployments override via env / gitignored .env.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,9 +22,18 @@ class Settings(BaseSettings):
     frontend_base_url: str = "http://localhost:5173"
     secret_store_backend: Literal["file", "keyvault"] = "file"
     secret_store_file_path: str = ".secrets.json"
-    key_vault_uri: str = ""  # required when secret_store_backend == "keyvault"
+    key_vault_uri: str | None = None  # required when secret_store_backend == "keyvault"
     cors_allowed_origin: str | None = None
     jwt_ttl_hours: int = Field(default=8, gt=0)
+
+    @model_validator(mode="after")
+    def _keyvault_requires_uri(self) -> "Settings":
+        if self.secret_store_backend == "keyvault" and not self.key_vault_uri:
+            raise ValueError(
+                "KEY_VAULT_URI is not configured — required when SECRET_STORE_BACKEND=keyvault "
+                "(set by the infra deployment as a Function App setting)"
+            )
+        return self
 
 
 @lru_cache
