@@ -161,6 +161,13 @@ Login → API request flow:
 blocking (fragile). A Bearer token the SPA holds and attaches explicitly is **origin-agnostic**
 — we only allow the SWA origin via CORS. This supersedes the earlier "session cookie" wording.
 
+**CORS is enforced at two layers** (D22 amendment, deployment Bugfix log #6): the Functions
+host answers `OPTIONS` preflights from the Function App's **platform** CORS allowlist and never
+forwards them to the worker, so the app-level FastAPI middleware (`CORS_ALLOWED_ORIGIN`) alone
+fails silently in prod — the browser drops any fetch carrying `Authorization` after a bare-204
+preflight. The platform allowlist is template-managed in the infra repo (`resources.bicep`),
+kept in lockstep with `CORS_ALLOWED_ORIGIN` by an ARM invariant test.
+
 ### Gmail account type is not a code branch
 
 One OAuth-broker path handles Workspace and consumer `@gmail.com` identically. Account type
