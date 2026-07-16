@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     secret_store_backend: Literal["file", "keyvault"] = "file"
     secret_store_file_path: str = ".secrets.json"
     key_vault_uri: str | None = None  # required when secret_store_backend == "keyvault"
+    table_storage_backend: Literal["connection_string", "managed_identity"] = "connection_string"
+    storage_connection_string: str = "UseDevelopmentStorage=true"  # default → local Azurite
+    tables_endpoint: str | None = None  # required when table_storage_backend == "managed_identity"
     cors_allowed_origin: str | None = None
     jwt_ttl_hours: int = Field(default=8, gt=0)
 
@@ -31,6 +34,16 @@ class Settings(BaseSettings):
         if self.secret_store_backend == "keyvault" and not self.key_vault_uri:
             raise ValueError(
                 "KEY_VAULT_URI is not configured — required when SECRET_STORE_BACKEND=keyvault "
+                "(set by the infra deployment as a Function App setting)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _managed_identity_requires_endpoint(self) -> "Settings":
+        if self.table_storage_backend == "managed_identity" and not self.tables_endpoint:
+            raise ValueError(
+                "TABLES_ENDPOINT is not configured — required when "
+                "TABLE_STORAGE_BACKEND=managed_identity "
                 "(set by the infra deployment as a Function App setting)"
             )
         return self
