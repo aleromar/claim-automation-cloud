@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { apiUrl } from "./api";
-import { authFetch, getToken } from "./auth";
+import { authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
 
 // Discriminated union: the email exists only in the authed state.
@@ -91,10 +91,18 @@ export default function App({
       </main>
     );
   }
+  // REQ-4.5/4.6 (logout delta): discards the browser's JWT only — no server-side
+  // revocation, and the stored Gmail refresh token is untouched.
+  const logout = () => {
+    clearToken();
+    setSession({ status: "anonymous" });
+  };
+
   return (
     <main>
       <h1>Claim Automation</h1>
       <p>{session.email}</p>
+      <button onClick={logout}>Log out</button>
       {health === "loading" && <p>Checking backend…</p>}
       {health === "ok" && <p>✅ All good</p>}
       {health === "error" && <p>⚠️ Backend unavailable</p>}

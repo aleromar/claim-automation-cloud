@@ -47,6 +47,7 @@ def login(
         "response_type": "code",
         "scope": SCOPES,
         "access_type": "offline",  # no prompt=consent: re-consent only on staleness (D18)
+        "prompt": "select_account",  # account picking, not re-consent — D18 intact
         "state": make_state(require_secret(store, SESSION_SIGNING_KEY)),
     }
     return RedirectResponse(f"{settings.google_auth_url}?{urlencode(params)}", status_code=302)
