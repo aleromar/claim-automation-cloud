@@ -88,8 +88,10 @@ violating azure-implementation.md's own public-repo mitigations.]**
    **Key Vault Secrets Officer** on the vault (data-plane seeding).
 2. WHEN an **app** deploy workflow runs THE SYSTEM SHALL authenticate as app registration
    `gha-claim-app` — federated to the public app repo's protected **`production`
-   environment** — holding only RG-scoped deploy rights (**Website Contributor** on the
-   Function App + **Contributor on the Static Web App** for token retrieval).
+   environment** — holding only RG-scoped deploy rights (**Reader** on the resource group,
+   used by the deploy workflows to discover the unique Function App name, + **Website
+   Contributor** on the Function App + **Contributor on the Static Web App** for token
+   retrieval).
 3. THE SYSTEM SHALL store no client secret, publish profile, or long-lived SWA token in
    GitHub secrets; the SWA deployment token SHALL be fetched at run time
    (`az staticwebapp secrets list`) after OIDC login.
@@ -103,7 +105,11 @@ violating azure-implementation.md's own public-repo mitigations.]**
 ### REQ-4: App deploys from this repo
 
 1. WHEN a push lands on `main` touching `backend/**` THE SYSTEM SHALL build and deploy the
-   Function App package (remote/Oryx build for Python deps).
+   Function App package (CI-vendored Python deps). **[REVISED 2026-07-16: originally
+   "remote/Oryx build for Python deps" — obsolete. On Linux Consumption + RBAC,
+   `functions-action` forces `WEBSITE_RUN_FROM_PACKAGE` and ignores its Oryx inputs, so CI
+   vendors dependencies into `.python_packages/lib/site-packages` inside the package. See
+   Bugfix log #4.]**
 2. WHEN a push lands on `main` touching `frontend/**` THE SYSTEM SHALL build the SPA with
    the production `VITE_API_BASE_URL` and deploy it to the Static Web App.
 3. WHEN neither path changed THE SYSTEM SHALL skip the corresponding deploy (path filter).
@@ -239,7 +245,7 @@ topology (CORS + absolute URL) is covered by the post-deploy manual smoke (step 
 | 10 | Infra `deploy.yml` (PR: build+tests+what-if; main: deploy + seed w/ retry) | IMPL | infra | REQ-1,3,5 |
 | 11 | `deploy-functions.yml` + `deploy-swa.yml` (SHA-pinned, env `production`) | IMPL | app | REQ-3,4 |
 | 12 | Live verification: provision, deploy, hit `/api/health`, load SWA, login smoke | VERIFY | both | all |
-| 13 | Docs: amend structure.md (3 spots, VITE_API_BASE_URL), azure-implementation.md (Log Analytics row, D14 carve-out, region=westeurope), tech.md block-13 stale row | DOC | app | — |
+| 13 | Docs: amend structure.md (3 spots, VITE_API_BASE_URL), azure-implementation.md (Log Analytics row, D14 carve-out, region per the [REVISED] decision: swedencentral + eastus2), tech.md block-13 stale row | DOC | app | — |
 
 ## Bugfix log
 
