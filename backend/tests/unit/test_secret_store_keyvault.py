@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.secret_store import KeyVaultSecretStore, create_secret_store
@@ -59,7 +60,7 @@ def test_factory_selects_keyvault_backend():
     assert isinstance(store, KeyVaultSecretStore)
 
 
-def test_factory_keyvault_requires_uri():
-    settings = Settings(secret_store_backend="keyvault", key_vault_uri="")
-    with pytest.raises(RuntimeError, match="KEY_VAULT_URI"):
-        create_secret_store(settings)
+def test_keyvault_without_uri_rejected_at_settings_load():
+    """keyvault + no URI is unconstructable: fails at settings load, not store creation."""
+    with pytest.raises(ValidationError, match="KEY_VAULT_URI"):
+        Settings(secret_store_backend="keyvault", key_vault_uri=None)
