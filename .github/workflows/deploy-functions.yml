@@ -24,9 +24,16 @@ jobs:
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
 
-      - name: Export requirements.txt for the Oryx remote build
+      # On Linux Consumption with RBAC the functions-action forces
+      # WEBSITE_RUN_FROM_PACKAGE and skips the Oryx remote build, so the
+      # package must ship its dependencies in .python_packages (the path the
+      # Python worker adds to sys.path).
+      - name: Vendor dependencies for run-from-package
         working-directory: backend
-        run: uv export --frozen --no-dev --no-emit-project -o requirements.txt
+        run: |
+          uv export --frozen --no-dev --no-emit-project -o requirements.txt
+          uv pip install --python 3.12 \
+            --target .python_packages/lib/site-packages -r requirements.txt
 
       - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
         with:
@@ -45,8 +52,6 @@ jobs:
           app-name: ${{ steps.fa.outputs.name }}
           package: backend
           respect-funcignore: true
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
 
       - name: Smoke — health endpoint
         run: |
