@@ -19,3 +19,11 @@ def test_host_json_declares_v2_and_adaptive_sampling() -> None:
     assert config["version"] == "2.0"
     sampling = config["logging"]["applicationInsights"]["samplingSettings"]
     assert sampling["isEnabled"] is True
+
+
+def test_host_json_empties_route_prefix() -> None:
+    """AsgiFunctionApp registers '/{*route}'; any non-empty routePrefix composes
+    the invalid template 'api//{*route}' and crashes the host (worker bug #1310).
+    FastAPI declares the /api prefix itself, so the Functions layer must not."""
+    config = json.loads(HOST_JSON.read_text())
+    assert config["extensions"]["http"]["routePrefix"] == ""
