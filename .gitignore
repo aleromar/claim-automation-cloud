@@ -27,5 +27,7 @@ e2e/.tmp/
 # OS / editor
 .DS_Store
 
+# Specs (local only, not published)
+.specs/
 
 docs/
