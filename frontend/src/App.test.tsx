@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import { consumeFragment } from "./auth";
+import { consumeFragment, getToken } from "./auth";
 
 const OPERATOR = "operator@example.com";
 
@@ -61,16 +61,19 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
 
   it("logs out: clears the stored token and shows the login screen (REQ-4.5/4.6)", async () => {
     storeToken();
-    mockApi();
+    const fetchSpy = mockApi();
     render(<App />);
     await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
+    const fetchCallsBeforeLogout = fetchSpy.mock.calls.length;
 
     fireEvent.click(screen.getByRole("button", { name: /log out/i }));
 
     expect(
       screen.getByRole("link", { name: /sign in with google/i }),
     ).toBeInTheDocument();
-    expect(sessionStorage.getItem("session_jwt")).toBeNull();
+    expect(getToken()).toBeNull();
+    // Client-side only (no server revocation): logout must issue no API call.
+    expect(fetchSpy.mock.calls.length).toBe(fetchCallsBeforeLogout);
   });
 
   it("shows a session-checking state while /api/me is in flight", () => {
