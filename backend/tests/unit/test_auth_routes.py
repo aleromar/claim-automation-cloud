@@ -75,7 +75,7 @@ def test_login_query_params(client):
     assert query["access_type"] == ["offline"]
     scopes = query["scope"][0].split()
     assert set(scopes) == {"openid", "email", "https://www.googleapis.com/auth/gmail.modify"}
-    assert "prompt" not in query  # no forced re-consent (D18)
+    assert query["prompt"] == ["select_account"]  # account picking, not re-consent (D18 intact)
 
 
 def test_login_state_is_verifiable(client):

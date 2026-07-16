@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -57,6 +57,20 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
   it("shows the login error carried in the fragment (REQ-4.4)", () => {
     render(<App initialError="unauthorized" />);
     expect(screen.getByRole("alert")).toHaveTextContent(/not authorized/i);
+  });
+
+  it("logs out: clears the stored token and shows the login screen (REQ-4.5/4.6)", async () => {
+    storeToken();
+    mockApi();
+    render(<App />);
+    await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /log out/i }));
+
+    expect(
+      screen.getByRole("link", { name: /sign in with google/i }),
+    ).toBeInTheDocument();
+    expect(sessionStorage.getItem("session_jwt")).toBeNull();
   });
 
   it("shows a session-checking state while /api/me is in flight", () => {

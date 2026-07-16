@@ -22,6 +22,12 @@ test("operator signs in via Google (stub) and sees the dashboard", async ({ page
   await expect(page.getByText(/all good/i)).toBeVisible();
   expect(page.url()).not.toContain("token="); // fragment stripped (REQ-4.1)
   expect(storedRefreshToken()).toBeTruthy(); // broker stored it (REQ-2.2)
+
+  // Logout (REQ-4.5/4.6): login screen first — reading storage before the React
+  // state flush is the flake risk — then assert the browser token is gone.
+  await page.getByRole("button", { name: /log out/i }).click();
+  await expect(page.getByRole("link", { name: /sign in with google/i })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("session_jwt"))).toBeNull();
 });
 
 test("cancelling at the consent screen returns to login with a generic error", async ({
