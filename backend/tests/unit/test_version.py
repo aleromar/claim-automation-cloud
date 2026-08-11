@@ -24,3 +24,9 @@ def test_stamped_file_is_read_and_stripped(tmp_path):
     stamp = tmp_path / "build_version.txt"
     stamp.write_text(f"{FULL_SHA}\n")
     assert get_build_version(stamp) == FULL_SHA
+
+
+def test_unreadable_stamp_falls_back_to_dev(tmp_path):
+    # A directory (or any OSError on read) must degrade to DEV_VERSION, never
+    # propagate — the liveness probe may not 500 over a cosmetic version file.
+    assert get_build_version(tmp_path) == DEV_VERSION

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { consumeFragment, getToken } from "./auth";
@@ -97,6 +97,15 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
 
 describe("App version footer (version-display REQ-3)", () => {
   const FULL_SHA = "884ac8adeadbeef0123456789abcdef012345678";
+
+  // The `frontend dev` asserts assume no ambient VITE_BUILD_VERSION (dev
+  // shell export or gitignored frontend/.env) — stub the absence (R-3).
+  beforeEach(() => {
+    vi.stubEnv("VITE_BUILD_VERSION", undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it("shows both short versions when health reports a backend version (REQ-3.1)", async () => {
     storeToken();

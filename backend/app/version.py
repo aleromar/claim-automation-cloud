@@ -6,20 +6,23 @@ version file is ever committed). Everywhere else (local dev, CI, e2e) the
 file is absent and the reader falls back to DEV_VERSION.
 """
 
+from functools import cache
 from pathlib import Path
 
 DEV_VERSION = "dev"
 BUILD_VERSION_FILE = Path(__file__).with_name("build_version.txt")
 
 
+@cache
 def get_build_version(path: Path = BUILD_VERSION_FILE) -> str:
-    """Read the stamped version; absent/empty file -> DEV_VERSION.
+    """Read the stamped version; absent/empty/unreadable file -> DEV_VERSION.
 
-    Read per call, uncached (V6): health is fetched once per login, and a
-    cache would fight the path injection the unit tests rely on.
+    Cached per path (V6, amended 2026-08-11): the stamp is immutable for the
+    process lifetime (run-from-package mount; a deploy restarts the workers),
+    and the cache key is the path, so the unit tests' injected tmp paths never
+    collide with the production entry.
     """
     try:
-        stamped = path.read_text().strip()
-    except FileNotFoundError:
+        return path.read_text().strip() or DEV_VERSION
+    except OSError:
         return DEV_VERSION
-    return stamped or DEV_VERSION

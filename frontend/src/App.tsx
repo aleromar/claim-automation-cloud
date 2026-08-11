@@ -3,7 +3,12 @@ import { useEffect, useState } from "react";
 import { apiUrl } from "./api";
 import { authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
-import { buildVersion, shortSha } from "./version";
+import {
+  buildVersion,
+  MISSING_VERSION,
+  shortSha,
+  UNKNOWN_VERSION,
+} from "./version";
 
 // Discriminated union: the email exists only in the authed state.
 type Session =
@@ -12,14 +17,12 @@ type Session =
   | { status: "authed"; email: string }
   | { status: "error"; message: string };
 // Same pattern: the backend version exists only in the ok state (version-display REQ-3).
+// `version` holds the display form (short SHA or a version.ts sentinel) —
+// shortening happens at the fetch boundary, where the value is known to be a SHA.
 type Health =
   | { status: "loading" }
   | { status: "ok"; version: string }
   | { status: "error" };
-
-// Health from an older backend without a version field stays ok (the contract
-// is keyed on `status`; `version` is additive) — shown as "unknown" (REQ-3.3).
-const UNKNOWN_BACKEND_VERSION = "unknown";
 
 // apiUrl: relative via the Vite proxy in dev, absolute Function App origin in prod (REQ-4.2).
 const HEALTH_URL = apiUrl("/api/health");
@@ -75,9 +78,11 @@ export default function App({
       .then((body: { status?: string; version?: string }) => {
         if (cancelled) return;
         if (body.status === "ok") {
+          // Ok without a version field stays ok (the contract is keyed on
+          // `status`; `version` is additive) — shown as "unknown" (REQ-3.3).
           setHealth({
             status: "ok",
-            version: body.version || UNKNOWN_BACKEND_VERSION,
+            version: body.version ? shortSha(body.version) : UNKNOWN_VERSION,
           });
         } else {
           setHealth({ status: "error" });
@@ -130,7 +135,7 @@ export default function App({
       {/* Outside <main> so it carries the contentinfo landmark role. Short SHAs;
           a mismatch is normal — deploys are path-filtered (version-display V4). */}
       <footer>
-        backend {health.status === "ok" ? shortSha(health.version) : "—"} ·
+        backend {health.status === "ok" ? health.version : MISSING_VERSION} ·
         frontend {shortSha(buildVersion())}
       </footer>
     </>

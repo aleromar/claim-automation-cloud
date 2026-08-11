@@ -3,6 +3,10 @@
 // pattern as VITE_API_BASE_URL); local/CI builds carry no stamp -> DEV_VERSION.
 
 export const DEV_VERSION = "dev";
+// Backend reported ok without a version field (older backend) — REQ-3.3.
+export const UNKNOWN_VERSION = "unknown";
+// Backend version not available (health still loading, or failed) — REQ-3.2.
+export const MISSING_VERSION = "—";
 
 const SHORT_SHA_LENGTH = 7;
 

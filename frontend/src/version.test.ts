@@ -10,6 +10,9 @@ afterEach(() => {
 
 describe("buildVersion (version-display REQ-3.5)", () => {
   it("falls back to DEV_VERSION when VITE_BUILD_VERSION is unset", () => {
+    // Stub the absence too: a VITE_BUILD_VERSION exported in a dev shell or a
+    // gitignored frontend/.env must not redden this test (review gate R-3).
+    vi.stubEnv("VITE_BUILD_VERSION", undefined);
     expect(buildVersion()).toBe(DEV_VERSION);
   });
 
