@@ -13,6 +13,9 @@ dist/
 # Frontend build / test output
 frontend/coverage/
 
+# Deploy-time version stamp (written by deploy-functions.yml; never committed)
+backend/app/build_version.txt
+
 # Playwright
 e2e/test-results/
 e2e/playwright-report/

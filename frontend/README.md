@@ -75,7 +75,9 @@ Two things worth explaining:
 
 The current feature (the "walking skeleton") is deliberately tiny: on load, the app calls
 the backend's `GET /api/health` endpoint and shows one of three states — _checking_,
-_all good_, or _backend unavailable_. Small as it is, it demonstrates several best
+_all good_, or _backend unavailable_. A footer shows which builds are running — the
+backend version reported by the same health response and this bundle's own build stamp
+(version-display spec). Small as it is, it demonstrates several best
 practices:
 
 - **A union type instead of loose strings.**

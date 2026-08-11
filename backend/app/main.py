@@ -18,6 +18,7 @@ from app.secret_store import (
     require_secret,
 )
 from app.security import require_operator
+from app.version import get_build_version
 
 
 @asynccontextmanager
@@ -58,8 +59,9 @@ if _cors_origin:
 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
-    """Liveness probe (REQ-1.1). No dependency checks — see spec S11."""
-    return {"status": "ok"}
+    """Liveness probe (REQ-1.1). No dependency checks — see spec S11
+    (amended by version-display REQ-1: body carries the build version)."""
+    return {"status": "ok", "version": get_build_version()}
 
 
 @app.get("/api/me")

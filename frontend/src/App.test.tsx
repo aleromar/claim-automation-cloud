@@ -95,6 +95,53 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
   });
 });
 
+describe("App version footer (version-display REQ-3)", () => {
+  const FULL_SHA = "884ac8adeadbeef0123456789abcdef012345678";
+
+  it("shows both short versions when health reports a backend version (REQ-3.1)", async () => {
+    storeToken();
+    mockApi({
+      health: new Response(
+        JSON.stringify({ status: "ok", version: FULL_SHA }),
+        { status: 200 },
+      ),
+    });
+    render(<App />);
+    const footer = await screen.findByRole("contentinfo");
+    // waitFor: the footer mounts before the mocked health fetch settles, so
+    // the backend slot briefly shows the placeholder.
+    await waitFor(() => expect(footer).toHaveTextContent(/backend 884ac8a/));
+    expect(footer).toHaveTextContent(/frontend dev/);
+  });
+
+  it("shows a placeholder for the backend version while health is not ok (REQ-3.2)", async () => {
+    storeToken();
+    mockApi({ health: new Response("", { status: 503 }) });
+    render(<App />);
+    const footer = await screen.findByRole("contentinfo");
+    await waitFor(() => expect(footer).toHaveTextContent(/backend —/));
+    expect(footer).toHaveTextContent(/frontend dev/);
+  });
+
+  it('shows "unknown" when health is ok but carries no version (REQ-3.3)', async () => {
+    storeToken();
+    mockApi(); // default health body: {"status":"ok"} with no version field
+    render(<App />);
+    const footer = await screen.findByRole("contentinfo");
+    await waitFor(() => expect(footer).toHaveTextContent(/backend unknown/));
+    // The ok-without-version body must not flip the health line to error.
+    expect(screen.getByText(/all good/i)).toBeInTheDocument();
+  });
+
+  it("renders no footer on the login screen (REQ-3.4)", () => {
+    render(<App />);
+    expect(
+      screen.getByRole("link", { name: /sign in with google/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("contentinfo")).toBeNull();
+  });
+});
+
 describe("App health status inside the authenticated dashboard (walking-skeleton REQ-2)", () => {
   it('shows "All good" when the backend health check returns ok', async () => {
     storeToken();

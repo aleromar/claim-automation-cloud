@@ -8,10 +8,15 @@ test("unauthenticated visit shows the login screen, no dashboard data", async ({
   await expect(page.getByText(/all good/i)).not.toBeVisible();
 });
 
-test("backend liveness endpoint stays public (REQ-3.3)", async ({ request }) => {
+test("backend liveness endpoint stays public (auth spec REQ-3.3; body amended by version-display REQ-1)", async ({ request }) => {
   const res = await request.get("http://localhost:8000/api/health");
   expect(res.ok()).toBeTruthy();
-  expect(await res.json()).toEqual({ status: "ok" });
+  const body = await res.json();
+  // Shape-only on version: uvicorn normally reports "dev", but a stray local
+  // stamp file must not redden e2e (version-display spec, review gate R-3).
+  expect(body).toMatchObject({ status: "ok" });
+  expect(typeof body.version).toBe("string");
+  expect(body.version.length).toBeGreaterThan(0);
 });
 
 test("protected API rejects unauthenticated calls", async ({ request }) => {
