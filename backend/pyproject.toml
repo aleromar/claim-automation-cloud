@@ -13,6 +13,7 @@ dependencies = [
     "httpx>=0.28",
     "azure-identity>=1.19",
     "azure-keyvault-secrets>=4.9",
+    "azure-data-tables>=12.5",
 ]
 
 [dependency-groups]

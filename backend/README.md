@@ -4,8 +4,9 @@ FastAPI application deployed as an Azure Function via `AsgiFunctionApp`.
 
 ```bash
 uv sync                         # install (incl. dev group)
-uv run uvicorn app.main:app --port 8000   # local dev server
-uv run pytest                   # unit tests
+uv run uvicorn app.main:app --port 8000   # local dev server (or `make dev`, which brings Azurite up too)
+make azurite                    # from the repo root — Azurite emulator, required by the integration tests
+uv run pytest                   # unit + integration tests (fails loudly without Azurite — no skip logic)
 uv run ruff check . && uv run ruff format --check .   # lint/format
 ```
 
