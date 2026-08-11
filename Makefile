@@ -8,6 +8,8 @@ install:
 
 # Local Azurite (Table Storage emulator) — the only containerized piece, so a plain
 # `docker run`, no compose (state-store spec, 2026-07-16). Reset: docker rm -f claim-azurite
+# All three ports published now: blob/queue (10000/10001) are for `func start` in the worker
+# feature, and published ports are fixed at container-create time.
 azurite:
 	@docker info >/dev/null 2>&1 || { echo "ERROR: Docker daemon not running — start Docker Desktop (needed for Azurite)"; exit 1; }
 	@docker start claim-azurite 2>/dev/null || docker run -d --name claim-azurite \
@@ -19,7 +21,7 @@ azurite:
 	done; echo "Azurite ready on :10002"
 
 # Run backend (uvicorn :8000) and frontend (Vite :5173) together for local dev.
-# Ctrl-C stops both.
+# Ctrl-C stops both; the Azurite container keeps running (reset: see azurite above).
 dev: azurite
 	cd backend && uv run uvicorn app.main:app --reload --port 8000 & \
 	cd frontend && npm run dev; \
@@ -36,7 +38,7 @@ seed-dev:
 	s.get(GOOGLE_CLIENT_SECRET) or s.set(GOOGLE_CLIENT_SECRET, 'dev-placeholder-not-a-real-secret'); \
 	print('.secrets.json seeded')"
 
-# Unit tests, both stacks.
+# Tests: backend unit + integration (vs Azurite), frontend unit.
 test: backend-test frontend-test
 
 backend-test: azurite

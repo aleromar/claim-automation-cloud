@@ -1,7 +1,7 @@
 """Typed Table Storage access layer (state-store spec; D11/D23).
 
-One table per data intent (D23); typed accessors exist only where a consumer
-exists today (items 2-3): the worker on/off flag and the heartbeat row.
+One table per data intent (D23); typed accessors exist only for the two rows
+items 2-3 will consume: the worker on/off flag and the heartbeat row.
 
 Sync `azure-data-tables` client: call from plain-`def` route handlers (FastAPI
 threadpool) or the timer worker — never directly from `async def` code, which
@@ -9,13 +9,12 @@ would block the Functions host's single event loop.
 """
 
 import logging
-from datetime import datetime
 from enum import StrEnum
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
-from azure.data.tables import TableClient, TableServiceClient, UpdateMode
+from azure.data.tables import TableClient, TableErrorCode, TableServiceClient, UpdateMode
 from azure.identity import DefaultAzureCredential
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel
 
 from app.config import Settings
 
@@ -46,9 +45,10 @@ ENABLED_PROP = "enabled"
 HEARTBEAT_AT_PROP = "at"
 HEARTBEAT_STATUS_PROP = "status"
 
-# The Table service distinguishes a missing entity ("ResourceNotFound") from a
-# missing table ("TableNotFound"); only the former is the fail-safe OFF case.
-ENTITY_NOT_FOUND = "ResourceNotFound"
+# The Table service reports a missing entity ("ResourceNotFound", or
+# "EntityNotFound" from some responses) distinctly from a missing table
+# ("TableNotFound"); only the missing-entity codes are the fail-safe OFF case.
+ENTITY_MISSING_CODES = (TableErrorCode.RESOURCE_NOT_FOUND, TableErrorCode.ENTITY_NOT_FOUND)
 
 
 class HeartbeatStatus(StrEnum):
@@ -57,7 +57,7 @@ class HeartbeatStatus(StrEnum):
 
 
 class Heartbeat(BaseModel):
-    at: datetime  # tz-aware UTC
+    at: AwareDatetime  # UTC by convention — callers use datetime.now(UTC); naive input rejected
     status: HeartbeatStatus
 
 
@@ -83,7 +83,7 @@ class StateStore:
         try:
             entity = self._table(WORKER_STATE_TABLE).get_entity(WORKER_STATE_PARTITION, ENABLED_ROW)
         except ResourceNotFoundError as exc:
-            if exc.error_code == ENTITY_NOT_FOUND:
+            if exc.error_code in ENTITY_MISSING_CODES:
                 return False
             raise
         return bool(entity[ENABLED_PROP])
@@ -113,7 +113,7 @@ class StateStore:
         try:
             entity = self._table(HEARTBEAT_TABLE).get_entity(HEARTBEAT_PARTITION, HEARTBEAT_ROW)
         except ResourceNotFoundError as exc:
-            if exc.error_code == ENTITY_NOT_FOUND:
+            if exc.error_code in ENTITY_MISSING_CODES:
                 return None
             raise
         return Heartbeat(
@@ -126,8 +126,9 @@ def state_store_from_settings(settings: Settings) -> StateStore:
     """Build the store for the configured backend and ensure the tables exist."""
     if settings.table_storage_backend == "managed_identity":
         # tables_endpoint is guaranteed by the settings validator.
+        assert settings.tables_endpoint
         service = TableServiceClient(
-            endpoint=settings.tables_endpoint or "", credential=DefaultAzureCredential()
+            endpoint=settings.tables_endpoint, credential=DefaultAzureCredential()
         )
     else:
         service = TableServiceClient.from_connection_string(settings.storage_connection_string)
