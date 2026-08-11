@@ -33,8 +33,8 @@ async def lifespan(_: FastAPI):
     require_secret(store, GOOGLE_CLIENT_SECRET)
     if not settings.operator_email:
         raise RuntimeError(
-            "OPERATOR_EMAIL is not configured — set it in the environment (dev: .env, "
-            "see backend/README; prod: app settings)"
+            "OPERATOR_EMAIL is not configured — set it in the environment (dev: .env "
+            "loaded via `make dev`, see backend/README; prod: app settings)"
         )
     yield
 

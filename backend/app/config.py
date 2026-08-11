@@ -1,7 +1,10 @@
 """Application settings (pydantic-settings, env-driven).
 
 All fields have test-safe defaults so importing `app.main` never explodes at
-collection time; real deployments override via env / gitignored .env.
+collection time. Config comes from process env vars ONLY — exactly like prod
+(Azure app settings). Local dev's gitignored .env is injected by the launcher
+(`make dev` via `uv run --env-file`), never read here: an app-owned dotenv
+source would leak a dev machine's .env into tests (bugfix, 2026-08-11).
 """
 
 from functools import lru_cache
@@ -12,7 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore")
 
     google_client_id: str = ""
     google_auth_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
