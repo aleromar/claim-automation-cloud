@@ -1,4 +1,4 @@
-.PHONY: install dev seed-dev test lint e2e azurite backend-test frontend-test backend-lint frontend-lint
+.PHONY: install dev env-check seed-dev test lint e2e azurite backend-test frontend-test backend-lint frontend-lint
 
 # Install dependencies for both stacks.
 install:
@@ -20,10 +20,18 @@ azurite:
 		sleep 0.5; \
 	done; echo "Azurite ready on :10002"
 
+# The app reads process env vars only (prod parity — see app/config.py); the
+# launcher injects backend/.env. Checked before azurite so a missing file
+# errors before Docker spins up.
+env-check:
+	@test -f backend/.env || { echo "ERROR: backend/.env missing — cp backend/.env.example backend/.env and fill it in (see backend/README)"; exit 1; }
+
 # Run backend (uvicorn :8000) and frontend (Vite :5173) together for local dev.
 # Ctrl-C stops both; the Azurite container keeps running (reset: see azurite above).
-dev: azurite
-	cd backend && uv run uvicorn app.main:app --reload --port 8000 & \
+# --env-file must precede `uvicorn` (after it, uvicorn silently swallows it).
+# Precedence (uv >= 0.5, verified 0.9.21): exported process vars win; .env gap-fills.
+dev: env-check azurite
+	cd backend && uv run --env-file .env uvicorn app.main:app --reload --port 8000 & \
 	cd frontend && npm run dev; \
 	kill %1 2>/dev/null || true
 

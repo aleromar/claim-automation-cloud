@@ -4,7 +4,7 @@ FastAPI application deployed as an Azure Function via `AsgiFunctionApp`.
 
 ```bash
 uv sync                         # install (incl. dev group)
-uv run uvicorn app.main:app --port 8000   # local dev server (or `make dev`, which brings Azurite up too)
+uv run --env-file .env uvicorn app.main:app --port 8000   # local dev server (or `make dev`, which brings Azurite up too)
 make azurite                    # from the repo root — Azurite emulator, required by the integration tests
 uv run pytest                   # unit + integration tests (fails loudly without Azurite — no skip logic)
 uv run ruff check . && uv run ruff format --check .   # lint/format
@@ -19,7 +19,9 @@ client secret, or `OPERATOR_EMAIL` is missing:
    file secret store with a random signing key and a **placeholder** client
    secret (enough to boot; real logins need step 3).
 2. `cp .env.example .env` and fill in the non-secret config, including
-   `OPERATOR_EMAIL` (the single allowed Google account).
+   `OPERATOR_EMAIL` (the single allowed Google account). The **launcher** loads
+   this file (`make dev` / the `--env-file` flag above); the app itself reads
+   only environment variables, exactly like prod.
 3. For a **real** Google login replace the placeholder client secret in the
    store: `uv run python -c "from app.secret_store import GOOGLE_CLIENT_SECRET,
    FileSecretStore; FileSecretStore('.secrets.json').set(GOOGLE_CLIENT_SECRET,

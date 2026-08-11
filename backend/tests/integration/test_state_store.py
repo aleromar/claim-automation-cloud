@@ -59,7 +59,7 @@ def test_ensure_tables_is_idempotent(service, prefix, store):
 
 
 def test_factory_ensures_tables(service):
-    settings = Settings(_env_file=None)  # defaults: connection_string → Azurite
+    settings = Settings()  # defaults: connection_string → Azurite
     store = state_store_from_settings(settings)
     assert set(ALL_TABLES) <= _listed_tables(service)
     assert store.read_enabled() is False  # sanity: factory-built store is usable
