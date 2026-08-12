@@ -3,6 +3,12 @@ import { useEffect, useState } from "react";
 import { apiUrl } from "./api";
 import { authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
+import {
+  buildVersion,
+  MISSING_VERSION,
+  shortSha,
+  UNKNOWN_VERSION,
+} from "./version";
 
 // Discriminated union: the email exists only in the authed state.
 type Session =
@@ -10,7 +16,13 @@ type Session =
   | { status: "checking" }
   | { status: "authed"; email: string }
   | { status: "error"; message: string };
-type Health = "loading" | "ok" | "error";
+// Same pattern: the backend version exists only in the ok state (version-display REQ-3).
+// `version` holds the display form (short SHA or a version.ts sentinel) —
+// shortening happens at the fetch boundary, where the value is known to be a SHA.
+type Health =
+  | { status: "loading" }
+  | { status: "ok"; version: string }
+  | { status: "error" };
 
 // apiUrl: relative via the Vite proxy in dev, absolute Function App origin in prod (REQ-4.2).
 const HEALTH_URL = apiUrl("/api/health");
@@ -23,7 +35,7 @@ export default function App({
   const [session, setSession] = useState<Session>(() =>
     getToken() ? { status: "checking" } : { status: "anonymous" },
   );
-  const [health, setHealth] = useState<Health>("loading");
+  const [health, setHealth] = useState<Health>({ status: "loading" });
 
   useEffect(() => {
     if (session.status !== "checking") return;
@@ -63,15 +75,27 @@ export default function App({
         if (!res.ok) throw new Error(`unexpected status ${res.status}`);
         return res.json();
       })
-      .then((body: { status?: string }) => {
-        if (!cancelled) setHealth(body.status === "ok" ? "ok" : "error");
+      .then((body: { status?: string; version?: string }) => {
+        if (cancelled) return;
+        if (body.status === "ok") {
+          // Ok without a version field stays ok (the contract is keyed on
+          // `status`; `version` is additive) — shown as "unknown" (REQ-3.3).
+          setHealth({
+            status: "ok",
+            version: body.version ? shortSha(body.version) : UNKNOWN_VERSION,
+          });
+        } else {
+          setHealth({ status: "error" });
+        }
       })
       .catch(() => {
-        if (!cancelled) setHealth("error");
+        if (!cancelled) setHealth({ status: "error" });
       });
     return () => {
       cancelled = true;
     };
+    // Keep deps as [session] only: `health` is a fresh object per fetch —
+    // adding it here would loop the effect.
   }, [session]);
 
   if (session.status === "anonymous") return <Login error={initialError} />;
@@ -99,13 +123,21 @@ export default function App({
   };
 
   return (
-    <main>
-      <h1>Claim Automation</h1>
-      <p>{session.email}</p>
-      <button onClick={logout}>Log out</button>
-      {health === "loading" && <p>Checking backend…</p>}
-      {health === "ok" && <p>✅ All good</p>}
-      {health === "error" && <p>⚠️ Backend unavailable</p>}
-    </main>
+    <>
+      <main>
+        <h1>Claim Automation</h1>
+        <p>{session.email}</p>
+        <button onClick={logout}>Log out</button>
+        {health.status === "loading" && <p>Checking backend…</p>}
+        {health.status === "ok" && <p>✅ All good</p>}
+        {health.status === "error" && <p>⚠️ Backend unavailable</p>}
+      </main>
+      {/* Outside <main> so it carries the contentinfo landmark role. Short SHAs;
+          a mismatch is normal — deploys are path-filtered (version-display V4). */}
+      <footer>
+        backend {health.status === "ok" ? health.version : MISSING_VERSION} ·
+        frontend {shortSha(buildVersion())}
+      </footer>
+    </>
   );
 }

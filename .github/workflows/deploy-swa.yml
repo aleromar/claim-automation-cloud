@@ -37,11 +37,16 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build with the prod API origin (REQ-4.2)
+      - name: Build with the prod API origin (deployment REQ-4.2) + version stamp (version-display REQ-2.2)
         working-directory: frontend
         run: |
           npm ci
-          VITE_API_BASE_URL="https://${FUNCTIONAPP_NAME}.azurewebsites.net" npm run build
+          VITE_API_BASE_URL="https://${FUNCTIONAPP_NAME}.azurewebsites.net" \
+            VITE_BUILD_VERSION="${GITHUB_SHA}" npm run build
+
+      # A mis-named env var would silently ship a "dev" footer (version-display REQ-2.5).
+      - name: Verify the build stamp landed in the bundle
+        run: grep -rq "${GITHUB_SHA}" frontend/dist
 
       - name: Fetch SWA deployment token at run time (REQ-3.3 — never stored)
         id: swa

@@ -20,11 +20,21 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Hard wall-clock bound: the smoke poll alone can burn ~5.5 min, and a
+    # hung connection must fail the run, not stall it against the 6 h cap.
+    timeout-minutes: 20
     environment: production
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      # The workflow is the only place that knows the SHA (version-display REQ-2.1);
+      # the file is gitignored and travels inside the artifact. Must run before
+      # the functions-action package step below — that's the step that zips
+      # backend/ (vendoring never touches app/).
+      - name: Stamp build version into the artifact
+        run: echo "${GITHUB_SHA}" > backend/app/build_version.txt
 
       # On Linux Consumption with RBAC the functions-action forces
       # WEBSITE_RUN_FROM_PACKAGE and skips the Oryx remote build, so the
@@ -49,8 +59,24 @@ jobs:
           package: backend
           respect-funcignore: true
 
-      - name: Smoke — health endpoint
+      # Poll until health reports the deployed SHA (version-display REQ-2.3).
+      # curl --retry is not enough: old instances answer 200 with the previous
+      # version during the package swap, and a lost stamp answers "dev".
+      - name: Smoke — health reports the deployed version
         run: |
           sleep 30
-          curl --fail --silent --show-error --retry 5 --retry-delay 15 --retry-all-errors \
-            "https://${FUNCTIONAPP_NAME}.azurewebsites.net/api/health"
+          last=""
+          for i in $(seq 1 20); do
+            last=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+              "https://${FUNCTIONAPP_NAME}.azurewebsites.net/api/health" \
+              | jq -r '.version // empty' || true)
+            if [ "${last}" = "${GITHUB_SHA}" ]; then
+              echo "Deployed version confirmed: ${last}"
+              exit 0
+            fi
+            echo "attempt ${i}/20: observed '${last:-no response}', want ${GITHUB_SHA}; retrying in 15s"
+            sleep 15
+          done
+          echo "ERROR: health never reported ${GITHUB_SHA}; last observed: '${last:-no response}'"
+          echo "('dev' = stamp lost from the package; an old SHA = package not swapped)"
+          exit 1

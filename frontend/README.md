@@ -75,33 +75,40 @@ Two things worth explaining:
 
 The current feature (the "walking skeleton") is deliberately tiny: on load, the app calls
 the backend's `GET /api/health` endpoint and shows one of three states — _checking_,
-_all good_, or _backend unavailable_. Small as it is, it demonstrates several best
+_all good_, or _backend unavailable_. A footer shows which builds are running — the
+backend version reported by the same health response and this bundle's own build stamp
+(version-display spec). Small as it is, it demonstrates several best
 practices:
 
-- **A union type instead of loose strings.**
+- **A discriminated union instead of loose strings.**
 
   ```ts
-  type Status = "loading" | "ok" | "error";
+  type Health =
+    | { status: "loading" }
+    | { status: "ok"; version: string }
+    | { status: "error" };
   ```
 
-  This declares that the component's state can be _exactly_ one of three values. If a
-  future edit writes `setStatus("okk")`, the compiler rejects it immediately. In plain
-  JavaScript that typo would silently render nothing. This is TypeScript's signature
-  technique: **make invalid states unrepresentable**.
+  This declares that the component's state is _exactly_ one of three shapes, and that
+  the backend version exists _only_ in the ok state — code can't even ask for a version
+  while loading or after an error; the compiler rejects it. In plain JavaScript that
+  would be a silently `undefined` field. This is TypeScript's signature technique:
+  **make invalid states unrepresentable**.
 
 - **Typed React state.**
 
   ```ts
-  const [status, setStatus] = useState<Status>("loading");
+  const [health, setHealth] = useState<Health>({ status: "loading" });
   ```
 
-  The `<Status>` part ties the state variable to the union type above, so every read and
-  write of `status` is checked.
+  The `<Health>` part ties the state variable to the union type above, so every read and
+  write of `health` is checked.
 
 - **Typed handling of untrusted data.** The backend response is typed as
-  `{ status?: string }` — the `?` means "this field may be absent". The code then checks
-  the value explicitly (`body.status === "ok"`) instead of trusting it. Data crossing a
-  network boundary is never assumed to have the right shape.
+  `{ status?: string; version?: string }` — the `?` means "this field may be absent". The
+  code then checks the values explicitly (`body.status === "ok"`, a fallback for a missing
+  `version`) instead of trusting them. Data crossing a network boundary is never assumed
+  to have the right shape.
 
 - **Effect cleanup (the `cancelled` flag).** If the user navigates away while the request
   is still in flight, the `useEffect` cleanup function flips `cancelled` and the response
@@ -229,8 +236,9 @@ For a reviewer who wants the one-screen justification:
 
 1. **Strict mode everywhere** — `"strict": true` plus extra checks; type errors fail the
    build (`tsc -b` runs before every production build).
-2. **Types model the domain** — component state is a closed union
-   (`"loading" | "ok" | "error"`), making invalid states unrepresentable.
+2. **Types model the domain** — component state is a closed discriminated union
+   (per-state data like the backend `version` exists only in its state), making
+   invalid states unrepresentable.
 3. **Untrusted data is not trusted** — API responses are typed as optional and validated
    at the boundary.
 4. **Escape hatches are explicit and rare** — a single, justified non-null assertion in
