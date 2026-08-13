@@ -53,7 +53,8 @@ ENTITY_MISSING_CODES = (TableErrorCode.RESOURCE_NOT_FOUND, TableErrorCode.ENTITY
 
 class HeartbeatStatus(StrEnum):
     SKIPPED_DISABLED = "skipped_disabled"  # woke, flag off, exited
-    RAN = "ran"  # pipeline executed
+    RAN = "ran"  # pipeline ran to completion
+    FAILED = "failed"  # pipeline raised (added by worker-skeleton, 2026-08-12)
 
 
 class Heartbeat(BaseModel):

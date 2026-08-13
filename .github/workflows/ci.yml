@@ -37,7 +37,17 @@ jobs:
       - name: Start Azurite (make azurite)
         run: make azurite
         working-directory: ${{ github.workspace }}
-      - name: Tests (pytest — unit + integration vs Azurite)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Install Azure Functions Core Tools (func-start host test)
+        run: npm install -g azure-functions-core-tools@4.13.2
+      - name: Cache Functions extension bundle
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.azure-functions-core-tools
+          key: func-extension-bundle-${{ runner.os }}
+      - name: Tests (pytest — unit + integration vs Azurite + func host)
         run: uv run pytest
 
   frontend:

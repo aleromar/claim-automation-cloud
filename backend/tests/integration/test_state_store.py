@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
-from azure.data.tables import TableServiceClient
 
 from app.config import Settings
 from app.state_store import (
@@ -19,15 +18,6 @@ from app.state_store import (
     StateStore,
     state_store_from_settings,
 )
-
-AZURITE_CONNECTION_STRING = "UseDevelopmentStorage=true"
-
-
-@pytest.fixture
-def service():
-    client = TableServiceClient.from_connection_string(AZURITE_CONNECTION_STRING)
-    yield client
-    client.close()
 
 
 @pytest.fixture

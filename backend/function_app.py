@@ -9,5 +9,14 @@ our own auth (JWT, per tech.md D17/D22) is the single, deliberate gate.
 import azure.functions as func
 
 from app.main import app as fastapi_app
+from app.worker import WORKER_FUNCTION_NAME, WORKER_TIMER_SCHEDULE, run_scheduled_worker
 
 app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONYMOUS)
+
+
+@app.function_name(WORKER_FUNCTION_NAME)
+@app.timer_trigger(arg_name="timer", schedule=WORKER_TIMER_SCHEDULE)
+def worker(timer: func.TimerRequest) -> None:
+    """Scheduled worker (worker-skeleton spec; D4/D5): the timer always fires;
+    the enabled gate + heartbeat live in app/worker.py."""
+    run_scheduled_worker()
