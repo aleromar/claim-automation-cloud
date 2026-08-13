@@ -52,7 +52,10 @@ def test_factory_ensures_tables(service):
     settings = Settings()  # defaults: connection_string → Azurite
     store = state_store_from_settings(settings)
     assert set(ALL_TABLES) <= _listed_tables(service)
-    assert store.read_enabled() is False  # sanity: factory-built store is usable
+    # Sanity: factory-built store is usable. The value is not asserted — the
+    # unprefixed WorkerState row is shared mutable dev state (a killed host-test
+    # run can leave enabled=True behind).
+    assert isinstance(store.read_enabled(), bool)
 
 
 def test_enabled_defaults_to_off_when_row_missing(store):

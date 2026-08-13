@@ -108,6 +108,9 @@ def functions_host(tmp_path_factory, azurite_connection_string):
         # deps reproduces a Bugfix-#4-shaped "0 functions indexed" ghost.
         "languageWorkers__python__defaultExecutablePath": sys.executable,
         "STORAGE_CONNECTION_STRING": azurite_connection_string,
+        # Pinned: a shell-exported managed_identity backend would redirect the
+        # hosted worker to real Azure tables despite the connection string above.
+        "TABLE_STORAGE_BACKEND": "connection_string",
         "SECRET_STORE_BACKEND": "file",
         "SECRET_STORE_FILE_PATH": str(secrets_path),
         "OPERATOR_EMAIL": "operator@example.com",
@@ -130,13 +133,20 @@ def functions_host(tmp_path_factory, azurite_connection_string):
             _wait_until_indexed(base_url, proc, log_path)
             yield base_url
         finally:
-            group = os.getpgid(proc.pid)
-            os.killpg(group, signal.SIGTERM)
+            # start_new_session=True makes proc.pid the process-group ID; the
+            # group can outlive the (already-reaped) leader, so signal the group
+            # directly and tolerate its absence — getpgid on a reaped leader
+            # raises ProcessLookupError and would mask the test's real failure.
             try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(group, signal.SIGKILL)
-                proc.wait(timeout=10)
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # whole group already gone
+            else:
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait(timeout=10)
 
 
 def _indexed_functions(base_url: str) -> set[str]:
