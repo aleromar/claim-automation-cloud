@@ -6,7 +6,8 @@ FastAPI application deployed as an Azure Function via `AsgiFunctionApp`.
 uv sync                         # install (incl. dev group)
 uv run --env-file .env uvicorn app.main:app --port 8000   # local dev server (or `make dev`, which brings Azurite up too)
 make azurite                    # from the repo root — Azurite emulator, required by the integration tests
-uv run pytest                   # unit + integration tests (fails loudly without Azurite — no skip logic)
+brew tap azure/functions && brew install azure-functions-core-tools@4   # `func` CLI, required by the Functions-host integration test
+uv run pytest                   # unit + integration tests (fails loudly without Azurite or `func` — no skip logic)
 uv run ruff check . && uv run ruff format --check .   # lint/format
 ```
 
