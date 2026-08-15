@@ -16,8 +16,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from app.config import get_settings
-from app.state_store import Heartbeat, HeartbeatStatus, StateStore, state_store_from_settings
+from app.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
 from pipeline.entry import run_pipeline
 
 logger = logging.getLogger(__name__)
@@ -50,11 +49,12 @@ def _report(store: StateStore, outcome: HeartbeatStatus) -> None:
 
 
 def run_scheduled_worker() -> None:
-    """Composition root for the timer trigger: settings → store → stub pipeline.
+    """Composition root for the timer trigger: cached store → stub pipeline.
 
     Returns nothing: a timer invocation has no caller to answer (decided
-    2026-08-12). Item 3's process-now endpoint instead calls run_worker()
-    directly — same wake path (gate honored, heartbeat written), with the
-    returned outcome going into its HTTP response.
+    2026-08-12). The process-now endpoint (worker_routes.py) instead calls
+    run_worker() directly — same wake path (gate honored, heartbeat written),
+    with the returned outcome going into its HTTP response. Both compose the
+    store via get_state_store() (worker-controls REQ-6.2).
     """
-    run_worker(state_store_from_settings(get_settings()), run_pipeline)
+    run_worker(get_state_store(), run_pipeline)

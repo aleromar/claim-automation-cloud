@@ -14,14 +14,22 @@ function storeToken() {
 function mockApi({
   me = new Response(JSON.stringify({ email: OPERATOR }), { status: 200 }),
   health = new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+  // Factory, not a shared Response: the worker panel re-fetches status after
+  // actions and a Response body reads only once (worker-controls gate ER-W4).
+  worker = () =>
+    new Response(JSON.stringify({ enabled: false, heartbeat: null }), {
+      status: 200,
+    }),
 }: {
   me?: Response | Promise<Response>;
   health?: Response | Promise<Response>;
+  worker?: () => Response | Promise<Response>;
 } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url.includes("/api/me")) return me;
     if (url.includes("/api/health")) return health;
+    if (url.includes("/api/worker/status")) return worker();
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
@@ -74,6 +82,15 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     expect(getToken()).toBeNull();
     // Client-side only (no server revocation): logout must issue no API call.
     expect(fetchSpy.mock.calls.length).toBe(fetchCallsBeforeLogout);
+  });
+
+  it("renders the worker panel on the dashboard (worker-controls REQ-4.1)", async () => {
+    storeToken();
+    mockApi();
+    render(<App />);
+    expect(
+      await screen.findByRole("switch", { name: /worker enabled/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows a session-checking state while /api/me is in flight", () => {

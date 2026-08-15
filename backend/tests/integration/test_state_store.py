@@ -13,6 +13,10 @@ from azure.core.exceptions import ResourceNotFoundError
 from app.config import Settings
 from app.state_store import (
     ALL_TABLES,
+    ENABLED_PROP,
+    ENABLED_ROW,
+    WORKER_STATE_PARTITION,
+    WORKER_STATE_TABLE,
     Heartbeat,
     HeartbeatStatus,
     StateStore,
@@ -67,6 +71,21 @@ def test_set_enabled_roundtrip(store):
     assert store.read_enabled() is True
     store.set_enabled(False)
     assert store.read_enabled() is False
+
+
+def test_read_enabled_non_bool_property_raises(service, prefix, store):
+    # Only set_enabled(bool) legitimately writes this row; a foreign write can
+    # store e.g. the string "false", which truthiness would read as ON. Corrupt
+    # data must fail loud, never silently run the pipeline (worker-controls REQ-5).
+    service.get_table_client(prefix + WORKER_STATE_TABLE).upsert_entity(
+        {
+            "PartitionKey": WORKER_STATE_PARTITION,
+            "RowKey": ENABLED_ROW,
+            ENABLED_PROP: "false",
+        }
+    )
+    with pytest.raises(TypeError, match="str"):
+        store.read_enabled()
 
 
 def test_read_enabled_missing_table_raises(service, prefix):

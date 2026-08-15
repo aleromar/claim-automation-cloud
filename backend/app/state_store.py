@@ -10,13 +10,14 @@ would block the Functions host's single event loop.
 
 import logging
 from enum import StrEnum
+from functools import lru_cache
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.data.tables import TableClient, TableErrorCode, TableServiceClient, UpdateMode
 from azure.identity import DefaultAzureCredential
 from pydantic import AwareDatetime, BaseModel
 
-from app.config import Settings
+from app.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,15 @@ class StateStore:
             if exc.error_code in ENTITY_MISSING_CODES:
                 return False
             raise
-        return bool(entity[ENABLED_PROP])
+        value = entity[ENABLED_PROP]
+        # Only set_enabled(bool) legitimately writes this row; truthiness would
+        # read a foreign "false" string as ON — corrupt data fails loud instead
+        # (same stance as the missing-table fault above).
+        if not isinstance(value, bool):
+            raise TypeError(
+                f"WorkerState.{ENABLED_PROP} is {type(value).__name__!r}, expected bool"
+            )
+        return value
 
     def set_enabled(self, enabled: bool) -> None:
         self._table(WORKER_STATE_TABLE).upsert_entity(
@@ -137,3 +146,12 @@ def state_store_from_settings(settings: Settings) -> StateStore:
     store = StateStore(service)
     store.ensure_tables()
     return store
+
+
+@lru_cache
+def get_state_store() -> StateStore:
+    """Process-wide store (worker-controls REQ-6): ensure_tables() runs once at
+    first use, not per request/wake. Shared by the worker routes (FastAPI
+    dependency) and the timer — one Functions host process; the sync client is
+    thread-safe (Azure SDK track-2)."""
+    return state_store_from_settings(get_settings())

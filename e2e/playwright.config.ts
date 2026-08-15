@@ -7,6 +7,10 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,
+  // One worker: logins in different files share the stub IdP + the backend's
+  // secrets file, so cross-file parallelism races auth.spec's refresh-token
+  // persistence test (worker-controls gate ER-C1). The suite is small.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   use: {
@@ -39,6 +43,11 @@ export default defineConfig({
         FRONTEND_BASE_URL: "http://localhost:5173",
         SECRET_STORE_BACKEND: "file",
         SECRET_STORE_FILE_PATH: "../e2e/.tmp/secrets.json",
+        // Pin storage to local Azurite: this env merges over the invoking shell,
+        // where a stray TABLE_STORAGE_BACKEND=managed_identity export would point
+        // e2e at real Azure tables (worker-controls REQ-7.4).
+        TABLE_STORAGE_BACKEND: "connection_string",
+        STORAGE_CONNECTION_STRING: "UseDevelopmentStorage=true",
       },
     },
     {

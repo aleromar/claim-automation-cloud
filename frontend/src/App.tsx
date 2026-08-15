@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { apiUrl } from "./api";
 import { authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
+import WorkerControls from "./WorkerControls";
 import {
   buildVersion,
   MISSING_VERSION,
@@ -131,6 +132,7 @@ export default function App({
         {health.status === "loading" && <p>Checking backend…</p>}
         {health.status === "ok" && <p>✅ All good</p>}
         {health.status === "error" && <p>⚠️ Backend unavailable</p>}
+        <WorkerControls />
       </main>
       {/* Outside <main> so it carries the contentinfo landmark role. Short SHAs;
           a mismatch is normal — deploys are path-filtered (version-display V4). */}
