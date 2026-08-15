@@ -167,6 +167,21 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
     );
   });
 
+  it("clears a previous run result when the switch is toggled (review L2)", async () => {
+    // A lingering "Run result" from before a toggle describes a run under the
+    // OLD enabled state — misleading, so toggling must clear it.
+    mockWorkerApi();
+    render(<WorkerControls />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /process now/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/run result:/i)).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /worker enabled/i }));
+    await waitFor(() => expect(screen.queryByText(/run result:/i)).toBeNull());
+  });
+
   it("shows an inline error and re-fetches status when the run 500s", async () => {
     const spy = mockWorkerApi({ run: () => new Response("", { status: 500 }) });
     render(<WorkerControls />);

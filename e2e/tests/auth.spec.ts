@@ -3,12 +3,13 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
+import { OPERATOR } from "./constants";
+
 // Full cross-stack login flow against the stub IdP (auth spec REQ-6).
 // Serial: these tests share the backend's file secret store.
 test.describe.configure({ mode: "serial" });
 
 const SECRETS_PATH = fileURLToPath(new URL("../.tmp/secrets.json", import.meta.url));
-const OPERATOR = "operator@example.com";
 
 const storedRefreshToken = () =>
   JSON.parse(readFileSync(SECRETS_PATH, "utf8"))["gmail-refresh-token"];

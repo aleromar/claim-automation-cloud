@@ -95,6 +95,8 @@ export default function WorkerControls() {
   const toggle = async (target: boolean) => {
     setBusy(true);
     setActionFailed(false);
+    // A lingering run result would describe a run under the OLD enabled state (L2).
+    setRunOutcome(null);
     try {
       const body = (await post(ENABLED_URL, { enabled: target })) as {
         enabled?: unknown;
@@ -133,7 +135,8 @@ export default function WorkerControls() {
 
   // <article> renders as a Pico card; the switch is a native checkbox because
   // Pico's switch styling targets [type=checkbox][role=switch]. Its accessible
-  // name stays "Worker enabled" (aria-label wins over the On/Off label text).
+  // name IS the visible label text (WCAG 2.5.3 label-in-name, review L1 —
+  // voice control must be able to target what sighted users read).
   if (panel.status === "loading") {
     return (
       <article>
@@ -157,12 +160,11 @@ export default function WorkerControls() {
         <input
           type="checkbox"
           role="switch"
-          aria-label="Worker enabled"
           checked={panel.enabled}
           onChange={() => toggle(!panel.enabled)}
           disabled={busy}
         />
-        {panel.enabled ? "On" : "Off"}
+        Worker enabled
       </label>
       <p>
         Last run:{" "}

@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+import { OPERATOR } from "./constants";
+
 // Worker controls panel (worker-controls REQ-4): real backend + Azurite.
 // The test drives itself to a deterministic state through the UI — the
 // explicit-target toggle is idempotent — and always leaves enabled=false
 // (local dev tables are shared; OFF is the fail-safe).
-const OPERATOR = "operator@example.com";
 
 test("operator sets the worker off and process-now reports skipped", async ({
   page,

@@ -1,12 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { OPERATOR } from "./tests/constants";
+
 // Boots the REAL backend (uvicorn) and frontend (Vite) plus a local stub IdP —
 // the one documented exception to "no mocks" (structure.md, 2026-07-14).
 // Vite's dev proxy forwards /api/* from :5173 to the backend on :8000; the
 // OAuth callback hits :8000 directly, then redirects back to :5173.
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: true,
   // One worker: logins in different files share the stub IdP + the backend's
   // secrets file, so cross-file parallelism races auth.spec's refresh-token
   // persistence test (worker-controls gate ER-C1). The suite is small.
@@ -39,7 +40,7 @@ export default defineConfig({
         GOOGLE_TOKEN_URL: "http://localhost:9100/token",
         GOOGLE_CLIENT_ID: "e2e-client",
         OAUTH_REDIRECT_URI: "http://localhost:8000/api/auth/callback",
-        OPERATOR_EMAIL: "operator@example.com",
+        OPERATOR_EMAIL: OPERATOR,
         FRONTEND_BASE_URL: "http://localhost:5173",
         SECRET_STORE_BACKEND: "file",
         SECRET_STORE_FILE_PATH: "../e2e/.tmp/secrets.json",
