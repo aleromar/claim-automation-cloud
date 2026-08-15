@@ -16,10 +16,10 @@ test("operator sets the worker off and process-now reports skipped", async ({
 
   const workerSwitch = page.getByRole("switch", { name: /worker enabled/i });
   await expect(workerSwitch).toBeVisible();
-  if ((await workerSwitch.getAttribute("aria-checked")) === "true") {
+  if (await workerSwitch.isChecked()) {
     await workerSwitch.click();
   }
-  await expect(workerSwitch).toHaveAttribute("aria-checked", "false");
+  await expect(workerSwitch).not.toBeChecked();
 
   await page.getByRole("button", { name: /process now/i }).click();
   await expect(page.getByText(/run result:/i)).toHaveText(

@@ -44,7 +44,7 @@ function GoogleLogo() {
 
 export default function Login({ error }: { error: string | null }) {
   return (
-    <main>
+    <main className="container">
       <h1>Claim Automation</h1>
       <a href={apiUrl("/api/auth/login")} style={buttonStyle}>
         <GoogleLogo />

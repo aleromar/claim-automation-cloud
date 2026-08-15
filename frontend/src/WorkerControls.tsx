@@ -127,36 +127,39 @@ export default function WorkerControls() {
     }
   };
 
+  // <article> renders as a Pico card; the switch is a native checkbox because
+  // Pico's switch styling targets [type=checkbox][role=switch]. Its accessible
+  // name stays "Worker enabled" (aria-label wins over the On/Off label text).
   if (panel.status === "loading") {
     return (
-      <section>
+      <article>
         <h2>Worker</h2>
-        <p>Checking worker…</p>
-      </section>
+        <p aria-busy="true">Checking worker…</p>
+      </article>
     );
   }
   if (panel.status === "error") {
     return (
-      <section>
+      <article>
         <h2>Worker</h2>
         <p role="alert">⚠️ Worker status unavailable</p>
-      </section>
+      </article>
     );
   }
   return (
-    <section>
+    <article>
       <h2>Worker</h2>
-      <p>
-        <button
+      <label>
+        <input
+          type="checkbox"
           role="switch"
-          aria-checked={panel.enabled}
           aria-label="Worker enabled"
-          onClick={() => toggle(!panel.enabled)}
+          checked={panel.enabled}
+          onChange={() => toggle(!panel.enabled)}
           disabled={busy}
-        >
-          {panel.enabled ? "On" : "Off"}
-        </button>
-      </p>
+        />
+        {panel.enabled ? "On" : "Off"}
+      </label>
       <p>
         Last run:{" "}
         {panel.heartbeat
@@ -166,7 +169,7 @@ export default function WorkerControls() {
           : "never"}
       </p>
       <p>
-        <button onClick={processNow} disabled={busy}>
+        <button onClick={processNow} disabled={busy} aria-busy={busy}>
           Process now
         </button>
         {runOutcome !== null && (
@@ -174,6 +177,6 @@ export default function WorkerControls() {
         )}
       </p>
       {actionFailed && <p role="alert">⚠️ Action failed — status refreshed</p>}
-    </section>
+    </article>
   );
 }

@@ -47,7 +47,7 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     const workerSwitch = await screen.findByRole("switch", {
       name: /worker enabled/i,
     });
-    expect(workerSwitch).toHaveAttribute("aria-checked", "false");
+    expect(workerSwitch).not.toBeChecked();
     expect(screen.getByText(/last run:/i)).toHaveTextContent(/never/i);
   });
 
@@ -62,7 +62,7 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     expect(lastRun).toHaveTextContent(/skipped \(worker off\)/i);
     expect(
       screen.getByRole("switch", { name: /worker enabled/i }),
-    ).toHaveAttribute("aria-checked", "true");
+    ).toBeChecked();
   });
 
   it("shows the error state when the status fetch fails", async () => {
@@ -99,9 +99,7 @@ describe("WorkerControls toggle (REQ-4.3)", () => {
       name: /worker enabled/i,
     });
     fireEvent.click(workerSwitch);
-    await waitFor(() =>
-      expect(workerSwitch).toHaveAttribute("aria-checked", "true"),
-    );
+    await waitFor(() => expect(workerSwitch).toBeChecked());
     const post = spy.mock.calls.find(([input]) =>
       String(input).includes("/api/worker/enabled"),
     );

@@ -102,15 +102,15 @@ export default function App({
   if (session.status === "anonymous") return <Login error={initialError} />;
   if (session.status === "checking") {
     return (
-      <main>
+      <main className="container">
         <h1>Claim Automation</h1>
-        <p>Checking session…</p>
+        <p aria-busy="true">Checking session…</p>
       </main>
     );
   }
   if (session.status === "error") {
     return (
-      <main>
+      <main className="container">
         <h1>Claim Automation</h1>
         <p role="alert">⚠️ {session.message}</p>
       </main>
@@ -125,20 +125,40 @@ export default function App({
 
   return (
     <>
-      <main>
-        <h1>Claim Automation</h1>
-        <p>{session.email}</p>
-        <button onClick={logout}>Log out</button>
-        {health.status === "loading" && <p>Checking backend…</p>}
+      {/* Pico classless: nav bar in a header, content sections in main; the
+          only classes are Pico's own container/secondary. */}
+      <header className="container">
+        <nav>
+          <ul>
+            <li>
+              <strong>Claim Automation</strong>
+            </li>
+          </ul>
+          <ul>
+            <li>{session.email}</li>
+            <li>
+              <button className="secondary" onClick={logout}>
+                Log out
+              </button>
+            </li>
+          </ul>
+        </nav>
+      </header>
+      <main className="container">
+        {health.status === "loading" && (
+          <p aria-busy="true">Checking backend…</p>
+        )}
         {health.status === "ok" && <p>✅ All good</p>}
         {health.status === "error" && <p>⚠️ Backend unavailable</p>}
         <WorkerControls />
       </main>
       {/* Outside <main> so it carries the contentinfo landmark role. Short SHAs;
           a mismatch is normal — deploys are path-filtered (version-display V4). */}
-      <footer>
-        backend {health.status === "ok" ? health.version : MISSING_VERSION} ·
-        frontend {shortSha(buildVersion())}
+      <footer className="container">
+        <small>
+          backend {health.status === "ok" ? health.version : MISSING_VERSION} ·
+          frontend {shortSha(buildVersion())}
+        </small>
       </footer>
     </>
   );
