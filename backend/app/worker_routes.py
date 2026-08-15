@@ -11,8 +11,7 @@ from pydantic import BaseModel, StrictBool
 
 from app.security import require_operator
 from app.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
-from app.worker import run_worker
-from pipeline.entry import run_pipeline
+from app.worker import run_wake
 
 router = APIRouter(prefix="/api/worker", dependencies=[Depends(require_operator)])
 
@@ -48,6 +47,7 @@ def set_worker_enabled(
 def run_worker_now(store: StateStore = Depends(get_state_store)) -> RunResult:
     """Process-now: the full wake path, not a bare pipeline call (contract settled
     2026-08-12) — honors the enabled gate and writes the end-of-run heartbeat.
+    run_wake IS run_worker(store, run_pipeline), named once in worker.py (M2).
     A pipeline failure propagates AFTER run_worker writes the `failed` heartbeat
     (→ 500; the status refresh carries the outcome, REQ-3.3)."""
-    return RunResult(outcome=run_worker(store, run_pipeline))
+    return RunResult(outcome=run_wake(store))

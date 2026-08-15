@@ -48,13 +48,20 @@ def _report(store: StateStore, outcome: HeartbeatStatus) -> None:
     logger.info("%s outcome=%s", WORKER_RUN_LOG_PREFIX, outcome.value)
 
 
+def run_wake(store: StateStore) -> HeartbeatStatus:
+    """The single composition point of wake + real pipeline (PR #15 review M2):
+    the timer and the process-now endpoint both call this. Item 5 swaps
+    run_pipeline's *body* in pipeline/entry.py; this wiring stands."""
+    return run_worker(store, run_pipeline)
+
+
 def run_scheduled_worker() -> None:
-    """Composition root for the timer trigger: cached store → stub pipeline.
+    """Composition root for the timer trigger: cached store → run_wake.
 
     Returns nothing: a timer invocation has no caller to answer (decided
-    2026-08-12). The process-now endpoint (worker_routes.py) instead calls
-    run_worker() directly — same wake path (gate honored, heartbeat written),
-    with the returned outcome going into its HTTP response. Both compose the
-    store via get_state_store() (worker-controls REQ-6.2).
+    2026-08-12). The process-now endpoint (worker_routes.py) calls run_wake()
+    with its request-scoped store — same wake path (gate honored, heartbeat
+    written), with the returned outcome going into its HTTP response. Both
+    compose the store via get_state_store() (worker-controls REQ-6.2).
     """
-    run_worker(get_state_store(), run_pipeline)
+    run_wake(get_state_store())
