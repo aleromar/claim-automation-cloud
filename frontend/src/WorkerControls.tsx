@@ -3,14 +3,18 @@ import { useEffect, useState } from "react";
 import { apiUrl } from "./api";
 import { authFetch } from "./auth";
 
-// The closed outcome set lives in one place; an unknown value (item 5 adds
-// skipped_no_access) renders raw — degrade readable, never crash (REQ-4.5).
-const OUTCOME_LABELS: Record<string, string> = {
+// The closed outcome set (mirrors backend HeartbeatStatus): the exact-key table
+// makes a typo'd, stale, or missing label a compile error. The lookup stays
+// permissive on purpose — an unknown value (item 5 adds skipped_no_access)
+// renders raw; degrade readable, never crash (REQ-4.5).
+type RunOutcome = "ran" | "failed" | "skipped_disabled";
+const OUTCOME_LABELS: Record<RunOutcome, string> = {
   ran: "ran",
   failed: "failed",
   skipped_disabled: "skipped (worker off)",
 };
-const outcomeLabel = (outcome: string) => OUTCOME_LABELS[outcome] ?? outcome;
+const outcomeLabel = (outcome: string) =>
+  OUTCOME_LABELS[outcome as RunOutcome] ?? outcome;
 
 type HeartbeatView = { at: string; status: string };
 // Discriminated union per the structure.md data-fetching pattern: per-state
