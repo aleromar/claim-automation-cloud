@@ -4,6 +4,7 @@ Requires Azurite on the standard ports (`make azurite`); fails loudly when it is
 down (state-store spec REQ-5.4 — no skip logic).
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -92,6 +93,25 @@ def test_read_enabled_missing_table_raises(service, prefix):
     unprovisioned = StateStore(service, table_prefix=prefix)  # no ensure_tables()
     with pytest.raises(ResourceNotFoundError):
         unprovisioned.read_enabled()
+
+
+def test_shared_store_is_safe_under_concurrent_use(store):
+    # The cached process-wide store (worker-controls REQ-6) is shared between
+    # the timer thread and FastAPI's threadpool, and azure-core's sync transport
+    # disclaims thread safety (one requests.Session per client) — StateStore
+    # serializes its ops with a lock. A race cannot fail deterministically, so
+    # this smoke documents the contract and catches gross breakage; the lock is
+    # the structural guarantee (see the worker-controls spec Bugfix log).
+    def hammer(worker_index: int) -> int:
+        for n in range(25):
+            store.set_enabled(n % 2 == 0)
+            assert isinstance(store.read_enabled(), bool)
+            store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN))
+            assert store.read_heartbeat() is not None
+        return worker_index
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        assert sorted(executor.map(hammer, range(8))) == list(range(8))
 
 
 def test_heartbeat_missing_reads_none(store):

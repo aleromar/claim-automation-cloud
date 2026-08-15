@@ -9,6 +9,7 @@ would block the Functions host's single event loop.
 """
 
 import logging
+import threading
 from enum import StrEnum
 from functools import lru_cache
 
@@ -67,23 +68,33 @@ class StateStore:
     def __init__(self, service: TableServiceClient, table_prefix: str = "") -> None:
         self._service = service
         self._prefix = table_prefix
+        # Serialize all table ops: the process-wide cached store (get_state_store)
+        # is shared between the timer thread and FastAPI's threadpool, and every
+        # op funnels through the service client's single requests.Session —
+        # azure-core's sync RequestsTransport explicitly disclaims thread safety.
+        # At single-operator volume (~ms point ops) serialization costs nothing.
+        self._lock = threading.Lock()
 
     def _table(self, name: str) -> TableClient:
         return self._service.get_table_client(self._prefix + name)
 
     def ensure_tables(self) -> None:
         """Create all five D23 tables if absent (idempotent)."""
-        for name in ALL_TABLES:
-            try:
-                self._service.create_table(self._prefix + name)
-            except ResourceExistsError:
-                pass
+        with self._lock:
+            for name in ALL_TABLES:
+                try:
+                    self._service.create_table(self._prefix + name)
+                except ResourceExistsError:
+                    pass
 
     def read_enabled(self) -> bool:
         """The worker on/off flag (D4). A missing row reads as OFF (fail-safe);
         a missing table is a deployment fault and propagates."""
         try:
-            entity = self._table(WORKER_STATE_TABLE).get_entity(WORKER_STATE_PARTITION, ENABLED_ROW)
+            with self._lock:
+                entity = self._table(WORKER_STATE_TABLE).get_entity(
+                    WORKER_STATE_PARTITION, ENABLED_ROW
+                )
         except ResourceNotFoundError as exc:
             if exc.error_code in ENTITY_MISSING_CODES:
                 return False
@@ -99,29 +110,32 @@ class StateStore:
         return value
 
     def set_enabled(self, enabled: bool) -> None:
-        self._table(WORKER_STATE_TABLE).upsert_entity(
-            {
-                "PartitionKey": WORKER_STATE_PARTITION,
-                "RowKey": ENABLED_ROW,
-                ENABLED_PROP: enabled,
-            },
-            mode=UpdateMode.REPLACE,
-        )
+        with self._lock:
+            self._table(WORKER_STATE_TABLE).upsert_entity(
+                {
+                    "PartitionKey": WORKER_STATE_PARTITION,
+                    "RowKey": ENABLED_ROW,
+                    ENABLED_PROP: enabled,
+                },
+                mode=UpdateMode.REPLACE,
+            )
 
     def write_heartbeat(self, heartbeat: Heartbeat) -> None:
-        self._table(HEARTBEAT_TABLE).upsert_entity(
-            {
-                "PartitionKey": HEARTBEAT_PARTITION,
-                "RowKey": HEARTBEAT_ROW,
-                HEARTBEAT_AT_PROP: heartbeat.at,
-                HEARTBEAT_STATUS_PROP: heartbeat.status.value,
-            },
-            mode=UpdateMode.REPLACE,
-        )
+        with self._lock:
+            self._table(HEARTBEAT_TABLE).upsert_entity(
+                {
+                    "PartitionKey": HEARTBEAT_PARTITION,
+                    "RowKey": HEARTBEAT_ROW,
+                    HEARTBEAT_AT_PROP: heartbeat.at,
+                    HEARTBEAT_STATUS_PROP: heartbeat.status.value,
+                },
+                mode=UpdateMode.REPLACE,
+            )
 
     def read_heartbeat(self) -> Heartbeat | None:
         try:
-            entity = self._table(HEARTBEAT_TABLE).get_entity(HEARTBEAT_PARTITION, HEARTBEAT_ROW)
+            with self._lock:
+                entity = self._table(HEARTBEAT_TABLE).get_entity(HEARTBEAT_PARTITION, HEARTBEAT_ROW)
         except ResourceNotFoundError as exc:
             if exc.error_code in ENTITY_MISSING_CODES:
                 return None
@@ -152,6 +166,7 @@ def state_store_from_settings(settings: Settings) -> StateStore:
 def get_state_store() -> StateStore:
     """Process-wide store (worker-controls REQ-6): ensure_tables() runs once at
     first use, not per request/wake. Shared by the worker routes (FastAPI
-    dependency) and the timer — one Functions host process; the sync client is
-    thread-safe (Azure SDK track-2)."""
+    dependency) and the timer — one Functions host process; cross-thread safety
+    comes from StateStore's own lock, NOT the SDK (azure-core's sync transport
+    disclaims it)."""
     return state_store_from_settings(get_settings())

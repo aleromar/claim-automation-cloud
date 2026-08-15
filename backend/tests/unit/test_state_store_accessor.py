@@ -13,7 +13,9 @@ from app.state_store import get_state_store
 @pytest.fixture(autouse=True)
 def clean_cache():
     """A store cached under one test's env (or a fake factory) must not leak
-    across tests in either direction (gate ER-W1)."""
+    across tests in either direction (gate ER-W1). Kept local — the systemic
+    clearing lives in `secret_env` (PR #15 review M1), which this module does
+    not consume: it tests the cache itself against a monkeypatched factory."""
     get_state_store.cache_clear()
     yield
     get_state_store.cache_clear()

@@ -50,13 +50,11 @@ def fake_store() -> FakeStateStore:
 
 @pytest.fixture(autouse=True)
 def store_override(fake_store):
-    """Override + cache/override hygiene in teardown (gate ER-W1): nothing cached
-    or overridden here may leak into other test modules."""
-    get_state_store.cache_clear()
+    """Inject the fake store; overrides cleaned in teardown. Store-cache hygiene
+    is systemic in tests/conftest.py `secret_env` (PR #15 review M1)."""
     app.dependency_overrides[get_state_store] = lambda: fake_store
     yield
     app.dependency_overrides.pop(get_state_store, None)
-    get_state_store.cache_clear()
 
 
 @pytest.fixture
