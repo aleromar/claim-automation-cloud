@@ -34,3 +34,5 @@ e2e/.tmp/
 .specs/
 
 docs/
+# TypeScript incremental-build cache (tsc -b) — machine-generated
+*.tsbuildinfo
