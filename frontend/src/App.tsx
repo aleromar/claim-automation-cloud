@@ -131,7 +131,10 @@ export default function App({
         <nav>
           <ul>
             <li>
-              <strong>Claim Automation</strong>
+              {/* Real h1 (heading outline: WorkerControls' h2 nests under it —
+                  review M4); sized inline to brand text, Pico has no nav-h1
+                  primitive. Inline-style precedent: Login's Google button. */}
+              <h1 style={{ fontSize: "1rem", margin: 0 }}>Claim Automation</h1>
             </li>
           </ul>
           <ul>
