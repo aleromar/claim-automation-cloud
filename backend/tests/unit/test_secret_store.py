@@ -32,6 +32,19 @@ def test_overwrite_replaces_value(store):
     assert store.get("google-client-secret") == "new"
 
 
+def test_trello_secret_names_in_closed_set(store):
+    # settings REQ-2: Trello creds join the closed SecretName set (D25); kebab-case
+    # like the existing names. Importing the constants IS the test that they exist.
+    from app.secret_store import TRELLO_API_KEY, TRELLO_TOKEN
+
+    assert TRELLO_API_KEY == "trello-api-key"
+    assert TRELLO_TOKEN == "trello-token"
+    store.set(TRELLO_API_KEY, "key-1")
+    store.set(TRELLO_TOKEN, "tok-1")
+    assert store.get(TRELLO_API_KEY) == "key-1"
+    assert store.get(TRELLO_TOKEN) == "tok-1"
+
+
 def test_file_created_with_0600(store, tmp_path):
     store.set("a", "b")
     mode = (tmp_path / "secrets.json").stat().st_mode & 0o777

@@ -37,20 +37,39 @@ def get_store(settings: Settings = Depends(get_settings)) -> SecretStore:
     return create_secret_store(settings)
 
 
-@router.get("/login")
-def login(
-    settings: Settings = Depends(get_settings), store: SecretStore = Depends(get_store)
-) -> RedirectResponse:
+def _authorize_redirect(settings: Settings, store: SecretStore, prompt: str) -> RedirectResponse:
+    """One param builder for both consent-screen flows — drift between them
+    would silently change scopes or redirect target (settings REQ-3)."""
     params = {
         "client_id": settings.google_client_id,
         "redirect_uri": settings.oauth_redirect_uri,
         "response_type": "code",
         "scope": SCOPES,
-        "access_type": "offline",  # no prompt=consent: re-consent only on staleness (D18)
-        "prompt": "select_account",  # account picking, not re-consent — D18 intact
+        "access_type": "offline",
+        "prompt": prompt,
         "state": make_state(require_secret(store, SESSION_SIGNING_KEY)),
     }
     return RedirectResponse(f"{settings.google_auth_url}?{urlencode(params)}", status_code=302)
+
+
+@router.get("/login")
+def login(
+    settings: Settings = Depends(get_settings), store: SecretStore = Depends(get_store)
+) -> RedirectResponse:
+    # prompt=select_account: account picking, not re-consent — D18 intact.
+    return _authorize_redirect(settings, store, prompt="select_account")
+
+
+@router.get("/reconnect")
+def reconnect(
+    settings: Settings = Depends(get_settings), store: SecretStore = Depends(get_store)
+) -> RedirectResponse:
+    """Forced re-consent → Google reissues the refresh token (settings REQ-3;
+    D18's staleness path). Deliberately guard-free (REQ-3.4): reached by
+    top-level navigation, which cannot carry a Bearer header — protection is
+    the callback's allowlist gate, same posture as /login."""
+    logger.info("reconnect flow started")
+    return _authorize_redirect(settings, store, prompt="consent")
 
 
 @router.get("/callback")

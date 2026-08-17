@@ -20,16 +20,31 @@ function mockApi({
     new Response(JSON.stringify({ enabled: false, heartbeat: null }), {
       status: 200,
     }),
+  settings = () =>
+    new Response(
+      JSON.stringify({
+        trello: {
+          api_key_stored: false,
+          token_stored: false,
+          board_id: "",
+          list_id: "",
+        },
+        gmail: { account_email: OPERATOR, refresh_token_stored: false },
+      }),
+      { status: 200 },
+    ),
 }: {
   me?: Response | Promise<Response>;
   health?: Response | Promise<Response>;
   worker?: () => Response | Promise<Response>;
+  settings?: () => Response | Promise<Response>;
 } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url.includes("/api/me")) return me;
     if (url.includes("/api/health")) return health;
     if (url.includes("/api/worker/status")) return worker();
+    if (url.includes("/api/settings")) return settings();
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
@@ -109,6 +124,41 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
         /session check returned an unexpected response/i,
       ),
     );
+  });
+});
+
+describe("App navigation (settings REQ-4.1) and authed error banner (REQ-4.8)", () => {
+  // BrowserRouter mutates real history — leave each test back on "/".
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("navigates Dashboard ⇄ Settings; worker controls stay on Dashboard", async () => {
+    storeToken();
+    mockApi();
+    render(<App />);
+    await screen.findByRole("switch", { name: /worker enabled/i });
+
+    fireEvent.click(screen.getByRole("link", { name: /settings/i }));
+    expect(
+      await screen.findByRole("heading", { name: /settings/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).toBeNull();
+
+    fireEvent.click(screen.getByRole("link", { name: /dashboard/i }));
+    expect(
+      await screen.findByRole("switch", { name: /worker enabled/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces a fragment error to a still-authed operator (REQ-4.8)", async () => {
+    // A failed reconnect redirects with #error= while the stored JWT is still
+    // valid — without this banner the failure is invisible (P10 gate finding).
+    storeToken();
+    mockApi();
+    render(<App initialError="login_failed" />);
+    await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
+    expect(screen.getByRole("alert")).toHaveTextContent(/google.*failed/i);
   });
 });
 

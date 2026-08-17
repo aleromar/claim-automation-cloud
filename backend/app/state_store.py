@@ -41,11 +41,15 @@ WORKER_STATE_PARTITION = "worker"
 ENABLED_ROW = "enabled"
 HEARTBEAT_PARTITION = "run"
 HEARTBEAT_ROW = "last"
+TRELLO_CONFIG_PARTITION = "trello"
+TRELLO_CONFIG_ROW = "config"
 
 # Entity property names.
 ENABLED_PROP = "enabled"
 HEARTBEAT_AT_PROP = "at"
 HEARTBEAT_STATUS_PROP = "status"
+BOARD_ID_PROP = "board_id"
+LIST_ID_PROP = "list_id"
 
 # The Table service reports a missing entity ("ResourceNotFound", or
 # "EntityNotFound" from some responses) distinctly from a missing table
@@ -62,6 +66,13 @@ class HeartbeatStatus(StrEnum):
 class Heartbeat(BaseModel):
     at: AwareDatetime  # UTC by convention — callers use datetime.now(UTC); naive input rejected
     status: HeartbeatStatus
+
+
+class TrelloConfig(BaseModel):
+    # Runtime-entered Trello IDs (D23/D25); empty strings are legal (fresh install,
+    # partial config). The secrets (key/token) live in the SecretStore, never here.
+    board_id: str
+    list_id: str
 
 
 class StateStore:
@@ -131,6 +142,30 @@ class StateStore:
                 },
                 mode=UpdateMode.REPLACE,
             )
+
+    def write_trello_config(self, config: TrelloConfig) -> None:
+        with self._lock:
+            self._table(TRELLO_CONFIG_TABLE).upsert_entity(
+                {
+                    "PartitionKey": TRELLO_CONFIG_PARTITION,
+                    "RowKey": TRELLO_CONFIG_ROW,
+                    BOARD_ID_PROP: config.board_id,
+                    LIST_ID_PROP: config.list_id,
+                },
+                mode=UpdateMode.REPLACE,
+            )
+
+    def read_trello_config(self) -> TrelloConfig | None:
+        try:
+            with self._lock:
+                entity = self._table(TRELLO_CONFIG_TABLE).get_entity(
+                    TRELLO_CONFIG_PARTITION, TRELLO_CONFIG_ROW
+                )
+        except ResourceNotFoundError as exc:
+            if exc.error_code in ENTITY_MISSING_CODES:
+                return None
+            raise
+        return TrelloConfig(board_id=entity[BOARD_ID_PROP], list_id=entity[LIST_ID_PROP])
 
     def read_heartbeat(self) -> Heartbeat | None:
         try:

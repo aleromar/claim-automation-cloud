@@ -114,6 +114,28 @@ def test_shared_store_is_safe_under_concurrent_use(store):
         assert sorted(executor.map(hammer, range(8))) == list(range(8))
 
 
+def test_trello_config_missing_reads_none(store):
+    # settings REQ-1.3: fresh install — no row is a normal state, not an error.
+    assert store.read_trello_config() is None
+
+
+def test_trello_config_write_read_roundtrip(store):
+    from app.state_store import TrelloConfig
+
+    written = TrelloConfig(board_id="g7vysmjD", list_id="68875e0d401d7613fcbbc092")
+    store.write_trello_config(written)
+    got = store.read_trello_config()
+    assert got == written
+
+
+def test_trello_config_overwrite_replaces(store):
+    from app.state_store import TrelloConfig
+
+    store.write_trello_config(TrelloConfig(board_id="old", list_id="old"))
+    store.write_trello_config(TrelloConfig(board_id="new", list_id="new"))
+    assert store.read_trello_config() == TrelloConfig(board_id="new", list_id="new")
+
+
 def test_heartbeat_missing_reads_none(store):
     assert store.read_heartbeat() is None
 

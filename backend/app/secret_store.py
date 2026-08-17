@@ -19,9 +19,17 @@ from app.config import Settings
 SESSION_SIGNING_KEY: Final = "session-signing-key"
 GOOGLE_CLIENT_SECRET: Final = "google-client-secret"
 GMAIL_REFRESH_TOKEN: Final = "gmail-refresh-token"
+TRELLO_API_KEY: Final = "trello-api-key"
+TRELLO_TOKEN: Final = "trello-token"
 
 # Closed set of secret names: a typo becomes a type error, not a silent None.
-SecretName = Literal["session-signing-key", "google-client-secret", "gmail-refresh-token"]
+SecretName = Literal[
+    "session-signing-key",
+    "google-client-secret",
+    "gmail-refresh-token",
+    "trello-api-key",
+    "trello-token",
+]
 
 
 class SecretStore(Protocol):
