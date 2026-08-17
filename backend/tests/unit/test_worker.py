@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 
 from app.state_store import Heartbeat, HeartbeatStatus
-from app.worker import WORKER_RUN_LOG_PREFIX, run_worker
+from app.worker import WORKER_RUN_LOG_PREFIX, run_scheduled_worker, run_worker
 
 
 class FakeStateStore:
@@ -124,6 +124,16 @@ def test_wake_logs_one_structured_line_per_outcome(caplog, enabled, expected_out
         _worker_run(enabled=enabled)
     worker_lines = [r.getMessage() for r in caplog.records if r.name == "app.worker"]
     assert worker_lines == [f"{WORKER_RUN_LOG_PREFIX} outcome={expected_outcome.value}"]
+
+
+def test_scheduled_worker_uses_cached_accessor(monkeypatch):
+    # worker-controls REQ-6.2: the timer composes via get_state_store() (shared,
+    # cached) — supersedes per-wake construction.
+    events: list[str] = []
+    store = FakeStateStore(enabled=False, events=events)
+    monkeypatch.setattr("app.worker.get_state_store", lambda: store)
+    run_scheduled_worker()
+    assert [hb.status for hb in store.heartbeats] == [HeartbeatStatus.SKIPPED_DISABLED]
 
 
 def test_failed_wake_logs_one_structured_line(caplog):

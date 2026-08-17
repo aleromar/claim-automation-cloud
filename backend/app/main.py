@@ -19,6 +19,7 @@ from app.secret_store import (
 )
 from app.security import require_operator
 from app.version import get_build_version
+from app.worker_routes import router as worker_router
 
 
 @asynccontextmanager
@@ -42,6 +43,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="claim-automation-cloud", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(worker_router)
 
 # Prod only: SWA and Function App are different origins (D22). Unset in dev
 # (Vite proxy is same-origin), so this is decided once at process start.

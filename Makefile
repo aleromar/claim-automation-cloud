@@ -9,12 +9,21 @@ install:
 # Local Azurite (Table Storage emulator) — the only containerized piece, so a plain
 # `docker run`, no compose (state-store spec, 2026-07-16). Reset: docker rm -f claim-azurite
 # All three ports published now: blob/queue (10000/10001) are for `func start` in the worker
-# feature, and published ports are fixed at container-create time.
+# feature, and published ports are fixed at container-create time — which is why a container
+# built from a different image is recreated below (worker-controls REQ-7.2: a reused pre-pin
+# container would keep the old image and 0.0.0.0 binds forever).
+AZURITE_IMAGE := mcr.microsoft.com/azure-storage/azurite:3.36.0
+
 azurite:
 	@docker info >/dev/null 2>&1 || { echo "ERROR: Docker daemon not running — start Docker Desktop (needed for Azurite)"; exit 1; }
+	@if [ -n "$$(docker ps -aq -f name='^claim-azurite$$')" ] && \
+		[ "$$(docker inspect claim-azurite --format '{{.Config.Image}}')" != "$(AZURITE_IMAGE)" ]; then \
+		echo "claim-azurite exists with a different image — recreating from $(AZURITE_IMAGE)"; \
+		docker rm -f claim-azurite >/dev/null; \
+	fi
 	@docker start claim-azurite 2>/dev/null || docker run -d --name claim-azurite \
-		-p 10000:10000 -p 10001:10001 -p 10002:10002 \
-		mcr.microsoft.com/azure-storage/azurite
+		-p 127.0.0.1:10000:10000 -p 127.0.0.1:10001:10001 -p 127.0.0.1:10002:10002 \
+		$(AZURITE_IMAGE)
 	@i=0; until nc -z 127.0.0.1 10002 2>/dev/null; do \
 		i=$$((i+1)); if [ $$i -ge 60 ]; then echo "ERROR: Azurite not ready on :10002 after 30s"; exit 1; fi; \
 		sleep 0.5; \
@@ -64,6 +73,7 @@ backend-lint:
 frontend-lint:
 	cd frontend && npm run lint
 
-# End-to-end (Playwright boots uvicorn + Vite itself).
-e2e:
+# End-to-end (Playwright boots uvicorn + Vite itself). Azurite first: the dashboard
+# fetches table-backed worker status on login (worker-controls REQ-7.3).
+e2e: azurite
 	cd e2e && npx playwright test

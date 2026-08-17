@@ -34,7 +34,7 @@ jobs:
         run: |
           uv run ruff check .
           uv run ruff format --check .
-      - name: Start Azurite (make azurite)
+      - name: Start Azurite
         run: make azurite
         working-directory: ${{ github.workspace }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -91,6 +91,9 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
+      # The dashboard fetches table-backed worker status on login (worker-controls REQ-7.3).
+      - name: Start Azurite
+        run: make azurite
       - name: Run Playwright e2e
         working-directory: e2e
         run: npx playwright test
