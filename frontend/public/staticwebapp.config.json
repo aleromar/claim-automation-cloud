@@ -2,5 +2,8 @@
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": ["/assets/*", "/*.{css,js,ico,png,svg,txt,map,json}"]
+  },
+  "globalHeaders": {
+    "Content-Security-Policy": "script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
   }
 }

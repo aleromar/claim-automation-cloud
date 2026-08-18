@@ -10,6 +10,7 @@ import respx
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from app.main import app
 from app.secret_store import (
     GMAIL_REFRESH_TOKEN,
     GOOGLE_CLIENT_SECRET,
@@ -40,8 +41,6 @@ def secret_path(secret_env, monkeypatch):
 
 @pytest.fixture
 def client(secret_path):
-    from app.main import app
-
     return TestClient(app, follow_redirects=False)
 
 
@@ -90,6 +89,9 @@ def test_login_state_is_verifiable(client):
 def test_reconnect_redirects_with_forced_consent(client):
     # Same flow as login except prompt=consent — forces Google to reissue a
     # refresh token (REQ-3.1); live proof = auth spec manual smoke item 6.
+    # No Authorization header anywhere in this request (REQ-3.4): the route is
+    # deliberately guard-free — top-level navigation cannot carry a Bearer
+    # header; its protection is the callback gate.
     resp = client.get("/api/auth/reconnect")
     assert resp.status_code == 302
     assert resp.headers["location"].startswith(AUTH_URL + "?")
@@ -111,19 +113,15 @@ def test_reconnect_matches_login_except_prompt(client):
     assert login == reconnect
 
 
-def test_reconnect_needs_no_authorization_header(client):
-    # REQ-3.4: reached by top-level navigation, which cannot carry a Bearer
-    # header — the route is deliberately guard-free (protection = callback gate).
-    resp = client.get("/api/auth/reconnect")  # no Authorization header at all
-    assert resp.status_code == 302
-
-
 def test_reconnect_logs_a_no_values_start_line(client, caplog):
     # REQ-3.6: one correlation line, no secrets or params in it.
     with caplog.at_level(logging.INFO, logger="app.auth_routes"):
         client.get("/api/auth/reconnect")
     starts = [r for r in caplog.records if "reconnect flow started" in r.getMessage()]
     assert len(starts) == 1
+    # Exact message: the whole point is that nothing (params, secrets, state)
+    # rides along.
+    assert starts[0].getMessage() == "reconnect flow started"
 
 
 # --- /api/auth/callback (REQ-2) ---

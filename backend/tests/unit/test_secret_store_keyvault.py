@@ -4,6 +4,9 @@ Azure SDK client is mocked (no network); DefaultAzureCredential is never constru
 in tests.
 """
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -41,6 +44,31 @@ def test_get_missing_returns_none(store, client):
 def test_set_creates_or_updates_secret(store, client):
     store.set("gmail-refresh-token", "tok-456")
     client.set_secret.assert_called_once_with("gmail-refresh-token", "tok-456")
+
+
+def test_ops_are_serialized_across_threads(store, client):
+    # get_store() is a process-wide singleton shared by FastAPI's threadpool,
+    # and azure-core's sync RequestsTransport (one requests.Session per client)
+    # disclaims thread safety — the store must serialize its ops, the same
+    # stance StateStore takes.
+    in_flight = 0
+    seen = []
+    meter = threading.Lock()
+
+    def slow_get(name):
+        nonlocal in_flight
+        with meter:
+            in_flight += 1
+            seen.append(in_flight)
+        time.sleep(0.005)
+        with meter:
+            in_flight -= 1
+        return MagicMock(value="v")
+
+    client.get_secret.side_effect = slow_get
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: store.get("session-signing-key"), range(16)))
+    assert max(seen) == 1  # never two threads inside the client at once
 
 
 def test_default_credential_used_when_no_client():

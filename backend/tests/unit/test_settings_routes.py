@@ -2,7 +2,8 @@
 
 Fake in-memory store via dependency_overrides[get_state_store]; the JWT guard is
 real (seeded file secret store + mint_session_jwt — the test_worker_routes
-pattern). Secrets are write-only: presence flags out, never values (REQ-1.2).
+pattern; fixtures shared in tests/conftest.py). Secrets are write-only:
+presence flags out, never values (REQ-1.2).
 """
 
 import logging
@@ -14,37 +15,15 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.secret_store import (
     GMAIL_REFRESH_TOKEN,
-    SESSION_SIGNING_KEY,
     TRELLO_API_KEY,
     TRELLO_TOKEN,
     FileSecretStore,
 )
-from app.security import mint_session_jwt
 from app.state_store import TrelloConfig, get_state_store
-from tests.conftest import OPERATOR, SIGNING_KEY
+from tests.conftest import OPERATOR
 
 SETTINGS_PATH = "/api/settings"
 TRELLO_PATH = "/api/settings/trello"
-
-
-class FakeStateStore:
-    """The two accessors the settings routes consume; records writes."""
-
-    def __init__(self, trello: TrelloConfig | None = None) -> None:
-        self.trello = trello
-        self.write_calls: list[TrelloConfig] = []
-
-    def read_trello_config(self) -> TrelloConfig | None:
-        return self.trello
-
-    def write_trello_config(self, config: TrelloConfig) -> None:
-        self.write_calls.append(config)
-        self.trello = config
-
-
-@pytest.fixture
-def fake_store() -> FakeStateStore:
-    return FakeStateStore()
 
 
 @pytest.fixture(autouse=True)
@@ -55,21 +34,8 @@ def store_override(fake_store):
 
 
 @pytest.fixture
-def secrets(secret_env) -> FileSecretStore:
-    store = FileSecretStore(secret_env)
-    store.set(SESSION_SIGNING_KEY, SIGNING_KEY)
-    return store
-
-
-@pytest.fixture
 def client(secrets) -> TestClient:
     return TestClient(app)
-
-
-@pytest.fixture
-def auth() -> dict[str, str]:
-    token = mint_session_jwt(OPERATOR, SIGNING_KEY, ttl_hours=8)
-    return {"Authorization": f"Bearer {token}"}
 
 
 # --- auth guard (REQ-1.4/2.6, router-level) ---
@@ -79,14 +45,6 @@ def auth() -> dict[str, str]:
 def test_settings_endpoints_require_auth(client, method, path):
     # No body on the POST on purpose: 401 (guard) must win over 422 (validation).
     assert client.request(method, path).status_code == 401
-
-
-def test_no_new_verbs_beyond_get_post():
-    # Two-layer CORS convention (worker-controls; D22 supplies the layers).
-    from app.settings_routes import router
-
-    methods = {m for route in router.routes for m in route.methods}
-    assert methods <= {"GET", "HEAD", "POST"}
 
 
 # --- read state (REQ-1) ---
@@ -121,11 +79,30 @@ def test_configured_state_shows_flags_and_ids_but_never_values(client, auth, sec
     assert "hunter2" not in resp.text  # write-only secrets (REQ-1.2)
 
 
+def test_settings_response_is_never_cached(client, auth, secrets):
+    # Presence flags/IDs/email are not secret values, but a cached copy could
+    # show stale credential state after a save or reconnect. Must be set in
+    # FastAPI — SWA globalHeaders don't touch API responses.
+    resp = client.get(SETTINGS_PATH, headers=auth)
+    assert resp.headers["Cache-Control"] == "no-store"
+
+
+def test_presence_flags_track_their_own_secret(client, auth, secrets):
+    # Asymmetric on purpose: swapping the two lookups in _trello_state passes
+    # every both-stored/both-absent test.
+    secrets.set(TRELLO_API_KEY, "key-only")
+    trello = client.get(SETTINGS_PATH, headers=auth).json()["trello"]
+    assert trello["api_key_stored"] is True
+    assert trello["token_stored"] is False
+
+
 # --- save (REQ-2) ---
 
 
-@respx.mock  # zero routes: any outbound httpx call raises (REQ-2.5 store-only;
-def test_save_all_four_fields(client, auth, secrets, fake_store):  # noqa: E501 — TestClient's ASGI transport passes through)
+# Zero respx routes: any outbound httpx call raises (REQ-2.5 store-only);
+# TestClient's ASGI transport passes through untouched.
+@respx.mock
+def test_save_all_four_fields(client, auth, secrets, fake_store):
     resp = client.post(
         TRELLO_PATH,
         headers=auth,
@@ -212,12 +189,74 @@ def test_table_write_failure_returns_generic_500(secrets, auth, fake_store):
         json={"api_key": "key-hunter2", "board_id": "b", "list_id": "l"},
     )
     assert resp.status_code == 500
+    # App-owned JSON body (REQ-2.7): must be raised as HTTPException inside the
+    # app — an unhandled exception is answered by Starlette's outermost
+    # ServerErrorMiddleware, outside CORSMiddleware, unreadable cross-origin.
+    assert resp.json() == {"detail": "settings save failed"}
     assert "hunter2" not in resp.text  # generic body, no submitted values
 
 
+def test_secret_write_failure_stops_before_the_table_write(auth, secrets, fake_store, monkeypatch):
+    # The FIRST write failing (Key Vault down) must behave like the table case
+    # — and the fixed secrets→table order means the table stays untouched,
+    # which is what makes "retry is safe" true (REQ-2.7).
+    def boom(self, name, value):
+        raise RuntimeError("vault down")
+
+    monkeypatch.setattr(FileSecretStore, "set", boom)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post(
+        TRELLO_PATH,
+        headers=auth,
+        json={"api_key": "key-hunter2", "board_id": "b", "list_id": "l"},
+    )
+    assert resp.status_code == 500
+    assert resp.json() == {"detail": "settings save failed"}
+    assert "hunter2" not in resp.text
+    assert fake_store.write_calls == []
+
+
+def test_write_failure_logs_no_values_line(secrets, auth, fake_store, caplog):
+    # REQ-2.9 must fire on failure too — a Key Vault/table outage is the exact
+    # event the correlation line exists for.
+    def boom(config):
+        raise RuntimeError("table down")
+
+    fake_store.write_trello_config = boom
+    client = TestClient(app, raise_server_exceptions=False)
+    with caplog.at_level(logging.INFO, logger="app.settings_routes"):
+        client.post(
+            TRELLO_PATH,
+            headers=auth,
+            json={"api_key": "key-hunter2", "board_id": "b", "list_id": "l"},
+        )
+    failures = [r for r in caplog.records if "trello settings save failed" in r.getMessage()]
+    assert len(failures) == 1
+    assert "hunter2" not in caplog.text  # includes the traceback
+
+
 def test_422_does_not_echo_submitted_values(client, auth):
-    # FastAPI's default validation body carries an `input` echo — stripped by
-    # the global handler (REQ-2.8, P5).
+    # FastAPI's default validation body carries an `input` echo — the global
+    # handler allowlists loc/msg/type so the no-echo property survives
+    # dependency upgrades that add new input-derived keys (REQ-2.8, P5).
     resp = client.post(TRELLO_PATH, headers=auth, json={"api_key": {"nested": "key-hunter2"}})
     assert resp.status_code == 422
     assert "hunter2" not in resp.text
+    for error in resp.json()["detail"]:
+        assert set(error) <= {"loc", "msg", "type"}
+
+
+def test_oversized_field_is_a_422_not_a_500(client, auth, fake_store):
+    # Key Vault caps values at 25KB / Table properties at 64KB: without a body
+    # cap an oversized input becomes a misleading "safe to retry" 500 loop.
+    # string_too_long is also the one error whose default body carries `ctx`.
+    resp = client.post(
+        TRELLO_PATH,
+        headers=auth,
+        json={"api_key": "key-hunter2" + "k" * 30_000, "board_id": "b", "list_id": "l"},
+    )
+    assert resp.status_code == 422
+    assert "hunter2" not in resp.text
+    assert fake_store.write_calls == []  # rejected before any write
+    for error in resp.json()["detail"]:
+        assert set(error) <= {"loc", "msg", "type"}

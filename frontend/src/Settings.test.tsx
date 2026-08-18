@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import Settings from "./Settings";
+import Settings, { type TrelloSaveRequest } from "./Settings";
 
 const OPERATOR = "operator@example.com";
 
@@ -15,12 +15,9 @@ const settingsBody = {
   gmail: { account_email: OPERATOR, refresh_token_stored: true },
 };
 
-type SaveBody = {
-  api_key: string;
-  token: string;
-  board_id: string;
-  list_id: string;
-};
+// The component's own body contract — a backend-driven field rename must
+// break these tests at compile time, not ship a silent ID wipe.
+type SaveBody = TrelloSaveRequest;
 
 // Factories, not shared Response objects: a Response body reads only once
 // (worker-controls gate ER-W4).
@@ -178,6 +175,53 @@ describe("Settings save (REQ-4.3/4.7)", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /save/i })).toBeEnabled(),
     );
+  });
+
+  it("keeps the typed secrets in the inputs when the save fails", async () => {
+    mockSettingsApi({ save: () => new Response("", { status: 500 }) });
+    render(<Settings />);
+    const token = await screen.findByLabelText(/api token/i);
+    fireEvent.change(token, { target: { value: "tok-typed" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/save failed/i),
+    );
+    // Clearing on failure would make the retry post "" → blank=keep → the new
+    // credential silently lost (P10 gate CRITICAL through a different door).
+    expect(screen.getByLabelText(/api token/i)).toHaveValue("tok-typed");
+  });
+
+  it("re-reads settings after a failed save: badges tell the stored truth, typed IDs survive", async () => {
+    let stateCalls = 0;
+    mockSettingsApi({
+      state: () => {
+        stateCalls += 1;
+        // The second read simulates a partial save: the token landed in the
+        // secret store before the table write failed.
+        return new Response(
+          JSON.stringify({
+            ...settingsBody,
+            trello: { ...settingsBody.trello, token_stored: stateCalls > 1 },
+          }),
+          { status: 200 },
+        );
+      },
+      save: () => new Response("", { status: 500 }),
+    });
+    render(<Settings />);
+    await screen.findByLabelText(/api token \(not set\)/i);
+    fireEvent.change(screen.getByLabelText(/board id/i), {
+      target: { value: "board-edited" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    // Never assume a write landed — re-read (the WorkerControls rule).
+    expect(
+      await screen.findByLabelText(/api token \(stored\)/i),
+    ).toBeInTheDocument();
+    // The re-read must not clobber operator input: retry re-sends these IDs.
+    expect(screen.getByLabelText(/board id/i)).toHaveValue("board-edited");
+    expect(screen.getByRole("alert")).toHaveTextContent(/save failed/i);
   });
 
   it("shows a retry-is-safe error state when the save fails (REQ-4.7)", async () => {

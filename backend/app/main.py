@@ -56,10 +56,12 @@ async def validation_error_without_input(
 ) -> JSONResponse:
     """422 bodies must not echo submitted values (settings REQ-2.8; P5) —
     FastAPI's default includes an `input` field, which for the settings form
-    could carry a live credential. `ctx` goes too: it can embed input-derived
-    context. Location + message keep the error actionable."""
+    could carry a live credential (`ctx` can embed input-derived context too).
+    Allowlist, not denylist: a dependency upgrade that adds a new
+    input-derived key must fail closed. Location + message keep the error
+    actionable."""
     errors = [
-        {key: value for key, value in error.items() if key not in ("input", "ctx")}
+        {key: error[key] for key in ("loc", "msg", "type") if key in error}
         for error in exc.errors()
     ]
     return JSONResponse(status_code=422, content={"detail": errors})

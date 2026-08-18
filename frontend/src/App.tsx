@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+} from "react-router-dom";
 
 import { apiUrl } from "./api";
-import { authFetch, clearToken, getToken } from "./auth";
+import { authErrorMessage, authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
 import Settings from "./Settings";
 import WorkerControls from "./WorkerControls";
@@ -127,8 +133,7 @@ export default function App({
 
   return (
     // Router lives inside App (not main.tsx): the OAuth callback owns the URL
-    // fragment (#token=/#error=, consumed pre-render), and keeping the router
-    // here leaves every existing render(<App/>) call site intact.
+    // fragment (#token=/#error=, consumed pre-render).
     <BrowserRouter>
       {/* Pico classless: nav bar in a header, content sections in main; the
           only classes are Pico's own container/secondary. */}
@@ -161,9 +166,12 @@ export default function App({
       <main className="container">
         {/* A failed reconnect redirects here with #error= while the session is
             still valid — without this banner it would look like success
-            (settings REQ-4.8). */}
+            (settings REQ-4.8). Fixed copy only: the fragment is
+            attacker-writable free text. */}
         {initialError && (
-          <p role="alert">⚠️ Google flow failed ({initialError})</p>
+          <p role="alert">
+            ⚠️ Google flow failed. {authErrorMessage(initialError)}
+          </p>
         )}
         <Routes>
           <Route
@@ -180,6 +188,9 @@ export default function App({
             }
           />
           <Route path="/settings" element={<Settings />} />
+          {/* navigationFallback serves the SPA for ANY path (settings REQ-4.5):
+              a typo'd deep link must land somewhere, not on an empty main. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
       {/* Outside <main> so it carries the contentinfo landmark role. Short SHAs;

@@ -10,6 +10,14 @@ type TrelloState = {
   list_id: string;
 };
 type GmailState = { account_email: string; refresh_token_stored: boolean };
+// The POST body contract, shared with the test suite: a field drift between
+// the component and its tests cannot compile.
+export type TrelloSaveRequest = {
+  api_key: string;
+  token: string;
+  board_id: string;
+  list_id: string;
+};
 // Discriminated union per the structure.md data-fetching pattern.
 type Page =
   | { status: "loading" }
@@ -54,6 +62,7 @@ export default function Settings() {
   const [listId, setListId] = useState("");
   const [busy, setBusy] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [settingsEpoch, setSettingsEpoch] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,33 +76,40 @@ export default function Settings() {
         // A 200 with a broken contract is an error state, not success.
         if (isTrelloState(body.trello) && isGmailState(body.gmail)) {
           setPage({ status: "ok", trello: body.trello, gmail: body.gmail });
-          setBoardId(body.trello.board_id);
-          setListId(body.trello.list_id);
+          // Prefill only on mount: a re-read after a failed save must not
+          // clobber IDs the operator has typed — retry re-sends them.
+          if (settingsEpoch === 0) {
+            setBoardId(body.trello.board_id);
+            setListId(body.trello.list_id);
+          }
         } else {
           setPage({ status: "error" });
         }
       })
       .catch(() => {
-        if (!cancelled) setPage({ status: "error" });
+        // A failed re-read keeps the form: the save-failed alert is already
+        // up, and the error page would discard the operator's input.
+        if (!cancelled && settingsEpoch === 0) setPage({ status: "error" });
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [settingsEpoch]);
 
   const save = async () => {
     setBusy(true);
     setSaveFailed(false);
     try {
+      const request: TrelloSaveRequest = {
+        api_key: apiKey,
+        token,
+        board_id: boardId,
+        list_id: listId,
+      };
       const res = await authFetch(TRELLO_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_key: apiKey,
-          token,
-          board_id: boardId,
-          list_id: listId,
-        }),
+        body: JSON.stringify(request),
       });
       if (!res.ok) throw new Error(`unexpected status ${res.status}`);
       const body: unknown = await res.json();
@@ -111,6 +127,9 @@ export default function Settings() {
       // Writes are idempotent (secrets → table, fixed order): a retry of the
       // same save converges — say so instead of leaving the operator guessing.
       setSaveFailed(true);
+      // Never assume a write landed — re-read (the WorkerControls rule): a
+      // partial save may have stored a secret, and the badges must say so.
+      setSettingsEpoch((epoch) => epoch + 1);
     } finally {
       setBusy(false);
     }

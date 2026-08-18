@@ -1,25 +1,22 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { OPERATOR } from "./constants";
+import { login, restoreSecret, storedSecret } from "./helpers";
 
 // Settings tab cross-stack flow (settings spec REQ-4): real backend, Azurite
 // tables, file secret store. Serial: shares the backend's secret file.
 test.describe.configure({ mode: "serial" });
 
-const SECRETS_PATH = fileURLToPath(new URL("../.tmp/secrets.json", import.meta.url));
-
-const storedSecret = (name: string) =>
-  JSON.parse(readFileSync(SECRETS_PATH, "utf8"))[name];
-
-const login = async (page: Page) => {
-  await page.goto("/");
-  await page.getByRole("link", { name: /sign in with google/i }).click();
-  await page.getByRole("link", { name: "Approve", exact: true }).click();
-  await expect(page.getByText(OPERATOR)).toBeVisible();
-};
+// The save below writes a fake trello-api-key into the shared dev store, and
+// the UI is deliberately unable to clear a credential — restore what was
+// there before (worker.spec discipline: leave shared dev state as found).
+let trelloKeyBefore: string | undefined;
+test.beforeAll(() => {
+  trelloKeyBefore = storedSecret("trello-api-key");
+});
+test.afterAll(() => {
+  restoreSecret("trello-api-key", trelloKeyBefore);
+});
 
 test("save Trello settings, persist across reload, secrets write-only", async ({ page }) => {
   await login(page);

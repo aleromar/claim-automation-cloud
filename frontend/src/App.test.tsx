@@ -160,6 +160,30 @@ describe("App navigation (settings REQ-4.1) and authed error banner (REQ-4.8)", 
     await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
     expect(screen.getByRole("alert")).toHaveTextContent(/google.*failed/i);
   });
+
+  it("renders fixed banner copy, never the fragment's free text", async () => {
+    // Anyone can craft /#error=<free text>; the banner is trusted UI, so the
+    // code is mapped to fixed copy and the raw value never rendered.
+    storeToken();
+    mockApi();
+    render(<App initialError="EVIL_FREE_TEXT" />);
+    await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/google.*failed/i);
+    expect(alert).not.toHaveTextContent(/EVIL_FREE_TEXT/);
+  });
+
+  it("routes an unknown path back to the dashboard, not an empty main", async () => {
+    // navigationFallback serves the SPA for any typo'd deep link — without a
+    // catch-all route that renders header + nothing.
+    window.history.replaceState(null, "", "/tpyo");
+    storeToken();
+    mockApi();
+    render(<App />);
+    expect(
+      await screen.findByRole("switch", { name: /worker enabled/i }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("App version footer (version-display REQ-3)", () => {

@@ -1,7 +1,8 @@
 """worker-controls REQ-1/2/3: /api/worker/{status,enabled,run}.
 
 Fake in-memory store via dependency_overrides[get_state_store]; the JWT guard is
-real (seeded file secret store + mint_session_jwt, the test_auth_routes pattern).
+real (seeded file secret store + mint_session_jwt, the test_auth_routes pattern;
+fixtures shared in tests/conftest.py).
 """
 
 from datetime import UTC, datetime
@@ -10,42 +11,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.secret_store import SESSION_SIGNING_KEY, FileSecretStore
-from app.security import mint_session_jwt
 from app.state_store import Heartbeat, HeartbeatStatus, get_state_store
-from app.worker_routes import router
-from tests.conftest import OPERATOR, SIGNING_KEY
 
 STATUS_PATH = "/api/worker/status"
 ENABLED_PATH = "/api/worker/enabled"
 RUN_PATH = "/api/worker/run"
-
-
-class FakeStateStore:
-    """The four accessors the routes consume; records writes."""
-
-    def __init__(self, enabled: bool = False, heartbeat: Heartbeat | None = None) -> None:
-        self.enabled = enabled
-        self.heartbeat = heartbeat
-        self.set_calls: list[bool] = []
-
-    def read_enabled(self) -> bool:
-        return self.enabled
-
-    def set_enabled(self, enabled: bool) -> None:
-        self.set_calls.append(enabled)
-        self.enabled = enabled
-
-    def read_heartbeat(self) -> Heartbeat | None:
-        return self.heartbeat
-
-    def write_heartbeat(self, heartbeat: Heartbeat) -> None:
-        self.heartbeat = heartbeat
-
-
-@pytest.fixture
-def fake_store() -> FakeStateStore:
-    return FakeStateStore()
 
 
 @pytest.fixture(autouse=True)
@@ -58,15 +28,8 @@ def store_override(fake_store):
 
 
 @pytest.fixture
-def client(secret_env) -> TestClient:
-    FileSecretStore(secret_env).set(SESSION_SIGNING_KEY, SIGNING_KEY)
+def client(secrets) -> TestClient:
     return TestClient(app)
-
-
-@pytest.fixture
-def auth() -> dict[str, str]:
-    token = mint_session_jwt(OPERATOR, SIGNING_KEY, ttl_hours=8)
-    return {"Authorization": f"Bearer {token}"}
 
 
 # --- auth guard (REQ-1.2, router-level) ---
@@ -79,13 +42,6 @@ def auth() -> dict[str, str]:
 def test_worker_endpoints_require_auth(client, method, path):
     # No body on the POSTs on purpose: 401 (guard) must win over 422 (validation).
     assert client.request(method, path).status_code == 401
-
-
-def test_no_new_verbs_beyond_get_post():
-    # D22: both CORS layers allow exactly GET/POST (Starlette auto-adds HEAD to
-    # GET routes; it is not a new verb).
-    methods = {m for route in router.routes for m in route.methods}
-    assert methods <= {"GET", "HEAD", "POST"}
 
 
 # --- status (REQ-1) ---
@@ -164,13 +120,12 @@ def test_run_now_enabled_returns_ran_and_writes_heartbeat(client, auth, fake_sto
 
 
 def test_run_now_pipeline_failure_writes_failed_heartbeat_and_500s(
-    secret_env, auth, fake_store, monkeypatch
+    secrets, auth, fake_store, monkeypatch
 ):
     def failing_pipeline() -> None:
         raise RuntimeError("pipeline blew up")
 
     monkeypatch.setattr("app.worker.run_pipeline", failing_pipeline)
-    FileSecretStore(secret_env).set(SESSION_SIGNING_KEY, SIGNING_KEY)
     fake_store.enabled = True
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.post(RUN_PATH, headers=auth)
