@@ -178,10 +178,11 @@ export default function App({
             path="/"
             element={
               <>
+                {/* Healthy is silent (operator, 2026-08-18) — only loading and
+                    problems surface; the footer version proves the ok path. */}
                 {health.status === "loading" && (
                   <p aria-busy="true">Checking backend…</p>
                 )}
-                {health.status === "ok" && <p>✅ All good</p>}
                 {health.status === "error" && <p>⚠️ Backend unavailable</p>}
                 <WorkerControls />
               </>
