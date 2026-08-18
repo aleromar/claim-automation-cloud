@@ -5,7 +5,9 @@ import { expect, test } from "@playwright/test";
 test("unauthenticated visit shows the login screen, no dashboard data", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: /sign in with google/i })).toBeVisible();
-  await expect(page.getByText(/all good/i)).not.toBeVisible();
+  await expect(
+    page.getByRole("switch", { name: /worker enabled/i }),
+  ).not.toBeVisible();
 });
 
 test("backend liveness endpoint stays public (auth spec REQ-3.3; body amended by version-display REQ-1)", async ({ request }) => {

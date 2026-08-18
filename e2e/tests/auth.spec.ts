@@ -11,7 +11,11 @@ const storedRefreshToken = () => storedSecret("gmail-refresh-token");
 
 test("operator signs in via Google (stub) and sees the dashboard", async ({ page }) => {
   await login(page);
-  await expect(page.getByText(/all good/i)).toBeVisible();
+  // Authed dashboard data rendered (worker status round trip) — the "All good"
+  // banner was retired 2026-08-18; healthy is silent.
+  await expect(
+    page.getByRole("switch", { name: /worker enabled/i }),
+  ).toBeVisible();
   expect(page.url()).not.toContain("token="); // fragment stripped (REQ-4.1)
   expect(storedRefreshToken()).toBeTruthy(); // broker stored it (REQ-2.2)
 

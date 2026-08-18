@@ -230,7 +230,7 @@ describe("App version footer (version-display REQ-3)", () => {
     const footer = await screen.findByRole("contentinfo");
     await waitFor(() => expect(footer).toHaveTextContent(/backend unknown/));
     // The ok-without-version body must not flip the health line to error.
-    expect(screen.getByText(/all good/i)).toBeInTheDocument();
+    expect(screen.queryByText(/backend unavailable/i)).toBeNull();
   });
 
   it("renders no footer on the login screen (REQ-3.4)", () => {
@@ -243,13 +243,16 @@ describe("App version footer (version-display REQ-3)", () => {
 });
 
 describe("App health status inside the authenticated dashboard (walking-skeleton REQ-2)", () => {
-  it('shows "All good" when the backend health check returns ok', async () => {
+  it("renders no health banner when the backend is healthy (only problems surface)", async () => {
+    // REQ-2.1 superseded 2026-08-18 (operator): healthy = silent; the footer
+    // version is the ok-path proof of the health fetch.
     storeToken();
     mockApi();
     render(<App />);
-    await waitFor(() =>
-      expect(screen.getByText(/all good/i)).toBeInTheDocument(),
-    );
+    const footer = await screen.findByRole("contentinfo");
+    await waitFor(() => expect(footer).toHaveTextContent(/backend unknown/));
+    expect(screen.queryByText(/all good/i)).toBeNull();
+    expect(screen.queryByText(/backend unavailable/i)).toBeNull();
   });
 
   it("shows an error state on a non-ok HTTP status", async () => {
