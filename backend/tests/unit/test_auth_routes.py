@@ -1,5 +1,6 @@
 """REQ-1/2/3: /api/auth/login, /api/auth/callback (all branches), /api/me guard."""
 
+import logging
 import time
 from urllib.parse import parse_qs, urlsplit
 
@@ -9,6 +10,7 @@ import respx
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from app.main import app
 from app.secret_store import (
     GMAIL_REFRESH_TOKEN,
     GOOGLE_CLIENT_SECRET,
@@ -39,8 +41,6 @@ def secret_path(secret_env, monkeypatch):
 
 @pytest.fixture
 def client(secret_path):
-    from app.main import app
-
     return TestClient(app, follow_redirects=False)
 
 
@@ -83,6 +83,47 @@ def test_login_state_is_verifiable(client):
     assert verify_state(query["state"][0], SIGNING_KEY) is True
 
 
+# --- /api/auth/reconnect (settings REQ-3) ---
+
+
+def test_reconnect_redirects_with_forced_consent(client):
+    # Same flow as login except prompt=consent — forces Google to reissue a
+    # refresh token (REQ-3.1); live proof = auth spec manual smoke item 6.
+    # No Authorization header anywhere in this request (REQ-3.4): the route is
+    # deliberately guard-free — top-level navigation cannot carry a Bearer
+    # header; its protection is the callback gate.
+    resp = client.get("/api/auth/reconnect")
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith(AUTH_URL + "?")
+    query = parse_qs(urlsplit(resp.headers["location"]).query)
+    assert query["prompt"] == ["consent"]
+    assert query["access_type"] == ["offline"]
+    assert query["client_id"] == [CLIENT_ID]
+    assert verify_state(query["state"][0], SIGNING_KEY) is True
+
+
+def test_reconnect_matches_login_except_prompt(client):
+    # One shared param builder (settings design): drift between the two flows
+    # would silently change scopes or redirect target.
+    login = parse_qs(urlsplit(client.get("/api/auth/login").headers["location"]).query)
+    reconnect = parse_qs(urlsplit(client.get("/api/auth/reconnect").headers["location"]).query)
+    for params in (login, reconnect):
+        del params["state"]  # nonce differs per mint, by design
+        del params["prompt"]
+    assert login == reconnect
+
+
+def test_reconnect_logs_a_no_values_start_line(client, caplog):
+    # REQ-3.6: one correlation line, no secrets or params in it.
+    with caplog.at_level(logging.INFO, logger="app.auth_routes"):
+        client.get("/api/auth/reconnect")
+    starts = [r for r in caplog.records if "reconnect flow started" in r.getMessage()]
+    assert len(starts) == 1
+    # Exact message: the whole point is that nothing (params, secrets, state)
+    # rides along.
+    assert starts[0].getMessage() == "reconnect flow started"
+
+
 # --- /api/auth/callback (REQ-2) ---
 
 
@@ -104,6 +145,17 @@ def test_callback_happy_path_mints_jwt_and_stores_refresh_token(client, secret_p
     assert sent["client_id"] == [CLIENT_ID]
     assert sent["client_secret"] == ["shh-client-secret"]
     assert sent["grant_type"] == ["authorization_code"]
+
+
+@respx.mock
+def test_callback_with_refresh_token_overwrites_stored_one(client, secret_path):
+    # The reconnect return path (settings REQ-3.2): a fresh grant replaces the
+    # stale stored token — same callback, no reconnect-specific branch.
+    FileSecretStore(secret_path).set(GMAIL_REFRESH_TOKEN, "rt-stale")
+    _mock_token_endpoint({"id_token": _id_token(), "refresh_token": "rt-new"})
+    resp = client.get(f"/api/auth/callback?code=abc&state={make_state(SIGNING_KEY)}")
+    assert "token=" in _fragment(resp.headers["location"])
+    assert FileSecretStore(secret_path).get(GMAIL_REFRESH_TOKEN) == "rt-new"
 
 
 @respx.mock

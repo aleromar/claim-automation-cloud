@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+} from "react-router-dom";
 
 import { apiUrl } from "./api";
-import { authFetch, clearToken, getToken } from "./auth";
+import { authErrorMessage, authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
+import Settings from "./Settings";
 import WorkerControls from "./WorkerControls";
 import {
   buildVersion,
@@ -124,7 +132,9 @@ export default function App({
   };
 
   return (
-    <>
+    // Router lives inside App (not main.tsx): the OAuth callback owns the URL
+    // fragment (#token=/#error=, consumed pre-render).
+    <BrowserRouter>
       {/* Pico classless: nav bar in a header, content sections in main; the
           only classes are Pico's own container/secondary. */}
       <header className="container">
@@ -135,6 +145,12 @@ export default function App({
                   review M4); sized inline to brand text, Pico has no nav-h1
                   primitive. Inline-style precedent: Login's Google button. */}
               <h1 style={{ fontSize: "1rem", margin: 0 }}>Claim Automation</h1>
+            </li>
+            <li>
+              <NavLink to="/">Dashboard</NavLink>
+            </li>
+            <li>
+              <NavLink to="/settings">Settings</NavLink>
             </li>
           </ul>
           <ul>
@@ -148,12 +164,34 @@ export default function App({
         </nav>
       </header>
       <main className="container">
-        {health.status === "loading" && (
-          <p aria-busy="true">Checking backend…</p>
+        {/* A failed reconnect redirects here with #error= while the session is
+            still valid — without this banner it would look like success
+            (settings REQ-4.8). Fixed copy only: the fragment is
+            attacker-writable free text. */}
+        {initialError && (
+          <p role="alert">
+            ⚠️ Google flow failed. {authErrorMessage(initialError)}
+          </p>
         )}
-        {health.status === "ok" && <p>✅ All good</p>}
-        {health.status === "error" && <p>⚠️ Backend unavailable</p>}
-        <WorkerControls />
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <>
+                {health.status === "loading" && (
+                  <p aria-busy="true">Checking backend…</p>
+                )}
+                {health.status === "ok" && <p>✅ All good</p>}
+                {health.status === "error" && <p>⚠️ Backend unavailable</p>}
+                <WorkerControls />
+              </>
+            }
+          />
+          <Route path="/settings" element={<Settings />} />
+          {/* navigationFallback serves the SPA for ANY path (settings REQ-4.5):
+              a typo'd deep link must land somewhere, not on an empty main. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
       {/* Outside <main> so it carries the contentinfo landmark role. Short SHAs;
           a mismatch is normal — deploys are path-filtered (version-display V4). */}
@@ -163,6 +201,6 @@ export default function App({
           frontend {shortSha(buildVersion())}
         </small>
       </footer>
-    </>
+    </BrowserRouter>
   );
 }

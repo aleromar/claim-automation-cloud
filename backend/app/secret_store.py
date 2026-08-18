@@ -7,6 +7,8 @@ Key Vault via managed identity (deployment REQ-2).
 
 import json
 import os
+import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Final, Literal, Protocol
 
@@ -14,14 +16,22 @@ from azure.core.exceptions import ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
-from app.config import Settings
+from app.config import Settings, get_settings
 
 SESSION_SIGNING_KEY: Final = "session-signing-key"
 GOOGLE_CLIENT_SECRET: Final = "google-client-secret"
 GMAIL_REFRESH_TOKEN: Final = "gmail-refresh-token"
+TRELLO_API_KEY: Final = "trello-api-key"
+TRELLO_TOKEN: Final = "trello-token"
 
 # Closed set of secret names: a typo becomes a type error, not a silent None.
-SecretName = Literal["session-signing-key", "google-client-secret", "gmail-refresh-token"]
+SecretName = Literal[
+    "session-signing-key",
+    "google-client-secret",
+    "gmail-refresh-token",
+    "trello-api-key",
+    "trello-token",
+]
 
 
 class SecretStore(Protocol):
@@ -33,11 +43,19 @@ class SecretStore(Protocol):
 class FileSecretStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
+        # set() is read-modify-write on the whole file: two concurrent sets
+        # from the threadpool would silently drop one key (atomic replace
+        # protects against corruption, not lost updates).
+        self._lock = threading.Lock()
 
     def get(self, name: str) -> str | None:
         return self._read().get(name)
 
     def set(self, name: str, value: str) -> None:
+        with self._lock:
+            self._set_locked(name, value)
+
+    def _set_locked(self, name: str, value: str) -> None:
         secrets = self._read()
         secrets[name] = value
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
@@ -59,16 +77,22 @@ class KeyVaultSecretStore:
         self._client = client or SecretClient(
             vault_url=vault_uri, credential=DefaultAzureCredential()
         )
+        # get_store() shares one instance across FastAPI's threadpool, and
+        # azure-core's sync transport (one requests.Session per client)
+        # disclaims thread safety — serialize ops, the StateStore stance.
+        self._lock = threading.Lock()
 
     def get(self, name: str) -> str | None:
         try:
-            return self._client.get_secret(name).value
+            with self._lock:
+                return self._client.get_secret(name).value
         except ResourceNotFoundError:
             # Absent secret -> None, matching FileSecretStore so require_secret raises uniformly.
             return None
 
     def set(self, name: str, value: str) -> None:
-        self._client.set_secret(name, value)
+        with self._lock:
+            self._client.set_secret(name, value)
 
 
 def require_secret(store: SecretStore, name: SecretName) -> str:
@@ -89,3 +113,12 @@ def create_secret_store(settings: Settings) -> SecretStore:
     # model validator guarantees the URI is set.
     assert settings.key_vault_uri
     return KeyVaultSecretStore(settings.key_vault_uri)
+
+
+@lru_cache
+def get_store() -> SecretStore:
+    """Process-wide store (mirrors state_store.get_state_store): building the
+    Key Vault client costs a DefaultAzureCredential token acquisition — once
+    per process, not per request. Only the client is cached; every get() is a
+    live round trip."""
+    return create_secret_store(get_settings())

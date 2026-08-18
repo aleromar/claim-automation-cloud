@@ -24,6 +24,17 @@ export function consumeFragment(): { error: string | null } {
   return { error };
 }
 
+/**
+ * Fixed copy per auth error code (REQ-4.4/4.8). The `#error=` fragment is
+ * attacker-writable free text — never render it; the backend emits only these
+ * codes.
+ */
+export function authErrorMessage(code: string): string {
+  return code === "unauthorized"
+    ? "This account is not authorized."
+    : "Login failed. Please try again.";
+}
+
 export function getToken(): string | null {
   return sessionStorage.getItem(TOKEN_KEY);
 }

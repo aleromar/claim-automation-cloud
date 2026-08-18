@@ -21,6 +21,7 @@ from app.state_store import (
     Heartbeat,
     HeartbeatStatus,
     StateStore,
+    TrelloConfig,
     state_store_from_settings,
 )
 
@@ -112,6 +113,32 @@ def test_shared_store_is_safe_under_concurrent_use(store):
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         assert sorted(executor.map(hammer, range(8))) == list(range(8))
+
+
+def test_trello_config_missing_reads_none(store):
+    # settings REQ-1.3: fresh install — no row is a normal state, not an error.
+    assert store.read_trello_config() is None
+
+
+def test_trello_config_write_read_roundtrip(store):
+    written = TrelloConfig(board_id="g7vysmjD", list_id="68875e0d401d7613fcbbc092")
+    store.write_trello_config(written)
+    got = store.read_trello_config()
+    assert got == written
+
+
+def test_trello_config_empty_strings_round_trip(store):
+    # IDs are authoritative-as-submitted including empty (settings REQ-2.3):
+    # the real Table service must hand "" back, not drop the property — a
+    # dropped property would KeyError in read_trello_config.
+    store.write_trello_config(TrelloConfig(board_id="", list_id=""))
+    assert store.read_trello_config() == TrelloConfig(board_id="", list_id="")
+
+
+def test_trello_config_overwrite_replaces(store):
+    store.write_trello_config(TrelloConfig(board_id="old", list_id="old"))
+    store.write_trello_config(TrelloConfig(board_id="new", list_id="new"))
+    assert store.read_trello_config() == TrelloConfig(board_id="new", list_id="new")
 
 
 def test_heartbeat_missing_reads_none(store):

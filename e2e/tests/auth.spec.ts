@@ -1,25 +1,16 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { expect, test } from "@playwright/test";
 
 import { OPERATOR } from "./constants";
+import { login, storedSecret } from "./helpers";
 
 // Full cross-stack login flow against the stub IdP (auth spec REQ-6).
 // Serial: these tests share the backend's file secret store.
 test.describe.configure({ mode: "serial" });
 
-const SECRETS_PATH = fileURLToPath(new URL("../.tmp/secrets.json", import.meta.url));
-
-const storedRefreshToken = () =>
-  JSON.parse(readFileSync(SECRETS_PATH, "utf8"))["gmail-refresh-token"];
+const storedRefreshToken = () => storedSecret("gmail-refresh-token");
 
 test("operator signs in via Google (stub) and sees the dashboard", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("link", { name: /sign in with google/i }).click();
-  await page.getByRole("link", { name: "Approve", exact: true }).click();
-
-  await expect(page.getByText(OPERATOR)).toBeVisible();
+  await login(page);
   await expect(page.getByText(/all good/i)).toBeVisible();
   expect(page.url()).not.toContain("token="); // fragment stripped (REQ-4.1)
   expect(storedRefreshToken()).toBeTruthy(); // broker stored it (REQ-2.2)
@@ -47,10 +38,7 @@ test("cancelling at the consent screen returns to login with a generic error", a
 });
 
 test("repeat login without a refresh token keeps the stored one (REQ-2.3)", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("link", { name: /sign in with google/i }).click();
-  await page.getByRole("link", { name: "Approve", exact: true }).click();
-  await expect(page.getByText(OPERATOR)).toBeVisible();
+  await login(page);
   const firstToken = storedRefreshToken();
   expect(firstToken).toBeTruthy();
 

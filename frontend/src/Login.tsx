@@ -3,6 +3,7 @@
 // with the four-colour "G") but stays a plain <a> to the backend login route.
 
 import { apiUrl } from "./api";
+import { authErrorMessage } from "./auth";
 
 const buttonStyle: React.CSSProperties = {
   display: "inline-flex",
@@ -50,13 +51,7 @@ export default function Login({ error }: { error: string | null }) {
         <GoogleLogo />
         Sign in with Google
       </a>
-      {error && (
-        <p role="alert">
-          {error === "unauthorized"
-            ? "This account is not authorized."
-            : "Login failed. Please try again."}
-        </p>
-      )}
+      {error && <p role="alert">{authErrorMessage(error)}</p>}
     </main>
   );
 }

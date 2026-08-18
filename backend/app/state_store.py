@@ -1,7 +1,8 @@
 """Typed Table Storage access layer (state-store spec; D11/D23).
 
-One table per data intent (D23); typed accessors exist only for the two rows
-items 2-3 will consume: the worker on/off flag and the heartbeat row.
+One table per data intent (D23); typed accessors exist only for the rows the
+features shipped so far consume: the worker on/off flag, the heartbeat row and
+the Trello board/list config row.
 
 Sync `azure-data-tables` client: call from plain-`def` route handlers (FastAPI
 threadpool) or the timer worker — never directly from `async def` code, which
@@ -14,7 +15,13 @@ from enum import StrEnum
 from functools import lru_cache
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
-from azure.data.tables import TableClient, TableErrorCode, TableServiceClient, UpdateMode
+from azure.data.tables import (
+    TableClient,
+    TableEntity,
+    TableErrorCode,
+    TableServiceClient,
+    UpdateMode,
+)
 from azure.identity import DefaultAzureCredential
 from pydantic import AwareDatetime, BaseModel
 
@@ -41,11 +48,15 @@ WORKER_STATE_PARTITION = "worker"
 ENABLED_ROW = "enabled"
 HEARTBEAT_PARTITION = "run"
 HEARTBEAT_ROW = "last"
+TRELLO_CONFIG_PARTITION = "trello"
+TRELLO_CONFIG_ROW = "config"
 
 # Entity property names.
 ENABLED_PROP = "enabled"
 HEARTBEAT_AT_PROP = "at"
 HEARTBEAT_STATUS_PROP = "status"
+BOARD_ID_PROP = "board_id"
+LIST_ID_PROP = "list_id"
 
 # The Table service reports a missing entity ("ResourceNotFound", or
 # "EntityNotFound" from some responses) distinctly from a missing table
@@ -64,6 +75,13 @@ class Heartbeat(BaseModel):
     status: HeartbeatStatus
 
 
+class TrelloConfig(BaseModel):
+    # Runtime-entered Trello IDs (D23/D25); empty strings are legal (fresh install,
+    # partial config). The secrets (key/token) live in the SecretStore, never here.
+    board_id: str
+    list_id: str
+
+
 class StateStore:
     def __init__(self, service: TableServiceClient, table_prefix: str = "") -> None:
         self._service = service
@@ -78,6 +96,17 @@ class StateStore:
     def _table(self, name: str) -> TableClient:
         return self._service.get_table_client(self._prefix + name)
 
+    def _get_entity_or_none(self, table: str, partition: str, row: str) -> TableEntity | None:
+        """Missing entity → None (a normal state, each reader decides its
+        fail-safe); a missing table is a deployment fault and propagates."""
+        try:
+            with self._lock:
+                return self._table(table).get_entity(partition, row)
+        except ResourceNotFoundError as exc:
+            if exc.error_code in ENTITY_MISSING_CODES:
+                return None
+            raise
+
     def ensure_tables(self) -> None:
         """Create all five D23 tables if absent (idempotent)."""
         with self._lock:
@@ -88,17 +117,10 @@ class StateStore:
                     pass
 
     def read_enabled(self) -> bool:
-        """The worker on/off flag (D4). A missing row reads as OFF (fail-safe);
-        a missing table is a deployment fault and propagates."""
-        try:
-            with self._lock:
-                entity = self._table(WORKER_STATE_TABLE).get_entity(
-                    WORKER_STATE_PARTITION, ENABLED_ROW
-                )
-        except ResourceNotFoundError as exc:
-            if exc.error_code in ENTITY_MISSING_CODES:
-                return False
-            raise
+        """The worker on/off flag (D4). A missing row reads as OFF (fail-safe)."""
+        entity = self._get_entity_or_none(WORKER_STATE_TABLE, WORKER_STATE_PARTITION, ENABLED_ROW)
+        if entity is None:
+            return False
         value = entity[ENABLED_PROP]
         # Only set_enabled(bool) legitimately writes this row; truthiness would
         # read a foreign "false" string as ON — corrupt data fails loud instead
@@ -132,14 +154,30 @@ class StateStore:
                 mode=UpdateMode.REPLACE,
             )
 
+    def write_trello_config(self, config: TrelloConfig) -> None:
+        with self._lock:
+            self._table(TRELLO_CONFIG_TABLE).upsert_entity(
+                {
+                    "PartitionKey": TRELLO_CONFIG_PARTITION,
+                    "RowKey": TRELLO_CONFIG_ROW,
+                    BOARD_ID_PROP: config.board_id,
+                    LIST_ID_PROP: config.list_id,
+                },
+                mode=UpdateMode.REPLACE,
+            )
+
+    def read_trello_config(self) -> TrelloConfig | None:
+        entity = self._get_entity_or_none(
+            TRELLO_CONFIG_TABLE, TRELLO_CONFIG_PARTITION, TRELLO_CONFIG_ROW
+        )
+        if entity is None:
+            return None
+        return TrelloConfig(board_id=entity[BOARD_ID_PROP], list_id=entity[LIST_ID_PROP])
+
     def read_heartbeat(self) -> Heartbeat | None:
-        try:
-            with self._lock:
-                entity = self._table(HEARTBEAT_TABLE).get_entity(HEARTBEAT_PARTITION, HEARTBEAT_ROW)
-        except ResourceNotFoundError as exc:
-            if exc.error_code in ENTITY_MISSING_CODES:
-                return None
-            raise
+        entity = self._get_entity_or_none(HEARTBEAT_TABLE, HEARTBEAT_PARTITION, HEARTBEAT_ROW)
+        if entity is None:
+            return None
         return Heartbeat(
             at=entity[HEARTBEAT_AT_PROP],
             status=HeartbeatStatus(entity[HEARTBEAT_STATUS_PROP]),

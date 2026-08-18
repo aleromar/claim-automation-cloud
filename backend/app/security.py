@@ -13,7 +13,7 @@ import jwt
 from fastapi import Depends, HTTPException, Request
 
 from app.config import Settings, get_settings
-from app.secret_store import SESSION_SIGNING_KEY, create_secret_store, require_secret
+from app.secret_store import SESSION_SIGNING_KEY, get_store, require_secret
 
 STATE_TTL_SECONDS = 600
 
@@ -76,7 +76,7 @@ def require_operator(request: Request, settings: Settings = Depends(get_settings
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    signing_key = require_secret(create_secret_store(settings), SESSION_SIGNING_KEY)
+    signing_key = require_secret(get_store(), SESSION_SIGNING_KEY)
     try:
         return verify_session_jwt(token, signing_key, settings.operator_email)
     except InvalidSession as exc:

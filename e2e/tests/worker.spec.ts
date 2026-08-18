@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { OPERATOR } from "./constants";
+import { login } from "./helpers";
 
 // Worker controls panel (worker-controls REQ-4): real backend + Azurite.
 // The test drives itself to a deterministic state through the UI — the
@@ -10,10 +10,7 @@ import { OPERATOR } from "./constants";
 test("operator sets the worker off and process-now reports skipped", async ({
   page,
 }) => {
-  await page.goto("/");
-  await page.getByRole("link", { name: /sign in with google/i }).click();
-  await page.getByRole("link", { name: "Approve", exact: true }).click();
-  await expect(page.getByText(OPERATOR)).toBeVisible();
+  await login(page);
 
   const workerSwitch = page.getByRole("switch", { name: /worker enabled/i });
   await expect(workerSwitch).toBeVisible();
