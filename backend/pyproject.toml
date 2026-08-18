@@ -14,6 +14,9 @@ dependencies = [
     "azure-identity>=1.19",
     "azure-keyvault-secrets>=4.9",
     "azure-data-tables>=12.5",
+    "reportlab>=5.0",
+    "pillow>=10.0",
+    "azure-storage-blob>=12.24",
 ]
 
 [dependency-groups]

@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     tables_endpoint: str | None = None  # required when table_storage_backend == "managed_identity"
     cors_allowed_origin: str | None = None
     jwt_ttl_hours: int = Field(default=8, gt=0)
+    field_extractor_backend: Literal["regex"] = "regex"  # 5a2 registers "llm"
+    membretes_container: str = "membretes"  # private Blob container (D26, amended)
+    # Consumed by 5c's composition root when it builds the BlobMembreteSource;
+    # no validator yet — a hard requirement would break the deployed app before
+    # 5c wires the pipeline (blob endpoint needed under managed_identity only).
+    blob_endpoint: str | None = None
 
     @model_validator(mode="after")
     def _keyvault_requires_uri(self) -> "Settings":
