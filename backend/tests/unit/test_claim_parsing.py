@@ -40,7 +40,7 @@ p.pt-Normal-000006 { margin: 0; }
     </p>
     <p dir="ltr" class="pt-Normal-000014">
       <span lang="es-ES" xml:space="preserve" class="pt-Fuentedeprrafopredeter-000015">Referencia Asitur: </span>
-      <span lang="es-ES" class="pt-Fuentedeprrafopredeter-000016">2026/814560</span>
+      <span lang="es-ES" class="pt-Fuentedeprrafopredeter-000016">2026/999888</span>
     </p>
     <p dir="ltr" class="pt-Normal-000007">
       <span lang="es-ES_tradnl" class="pt-Fuentedeprrafopredeter-000008">Datos del Asegurado:</span>
@@ -89,7 +89,7 @@ CONTACTO PERJ.: PERSONA DOS 1ºC - +34 600 00 00 02 </span>
 </html>
 """
 
-ASITUR_SUBJECT = "2026/814560 Declaración de siniestro a colaborador NORMAL (H)Envio N-ANJPAGVB"
+ASITUR_SUBJECT = "2026/999888 Declaración de siniestro a colaborador NORMAL (H)Envio N-EXAMPLE3"
 
 
 def _make_gmail_message(subject: str, body: str, mime: str = "text/plain") -> dict:
@@ -189,7 +189,7 @@ class TestAsiturXhtmlEndToEnd:
         assert claim is not None
         assert claim.type is ClaimType.DECLARACION_SINIESTRO
         assert claim.year == "2026"
-        assert claim.claim_number == "814560"
+        assert claim.claim_number == "999888"
 
     def test_fields_extracted_cleanly(self):
         msg = _make_gmail_message(ASITUR_SUBJECT, ASITUR_XHTML_BODY)

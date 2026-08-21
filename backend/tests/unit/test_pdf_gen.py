@@ -17,7 +17,7 @@ from PIL import UnidentifiedImageError
 from pipeline.claim_data import ClaimType
 from pipeline.pdf_gen import MEMBRETE_BY_TYPE, generate_pdf_from_email
 
-SAMPLE_BODY = "Compañía: Reale\nNif: H34140152\nDirección: CL SAN LAZARO 2\n"
+SAMPLE_BODY = "Compañía: Reale\nNif: H12345678\nDirección: CL FICTICIA 12\n"
 
 
 def synthetic_membrete_png(width: int = 600, height: int = 80) -> bytes:
@@ -164,7 +164,7 @@ def test_generate_pdf_with_stray_xhtml_markup_in_body(membretes):
     body_with_markup = (
         "Compañía: Reale\n"
         '<para><b><html xmlns="http://www.w3.org/1999/xhtml"></para>\n'
-        "Nif: H34140152\n"
+        "Nif: H12345678\n"
     )
     pdf = generate_pdf_from_email(
         body_with_markup, claim_type=ClaimType.DECLARACION_SINIESTRO, membrete_source=membretes

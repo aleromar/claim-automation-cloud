@@ -19,9 +19,9 @@ from pipeline.extraction import (
     get_field_extractor,
 )
 
-SUBJECT = "2026/367095 Declaración de siniestro a colaborador NORMAL (H)Envio N-X"
+SUBJECT = "2026/123456 Declaración de siniestro a colaborador NORMAL (H)Envio N-X"
 
-PLAIN_BODY = "Compañía: Reale\n\nNif: H34140152\n\nTomador: CDAD EJEMPLO\n"
+PLAIN_BODY = "Compañía: Reale\n\nNif: H12345678\n\nTomador: CDAD EJEMPLO\n"
 
 XHTML_BODY = (
     '<!DOCTYPE html ><html xmlns="http://www.w3.org/1999/xhtml"><body>'
@@ -80,7 +80,7 @@ class TestFieldExtractorSeam:
         assert claim.nif == "FAKE-NIF"
         # Deterministic parts are NOT the extractor's job.
         assert claim.year == "2026"
-        assert claim.claim_number == "367095"
+        assert claim.claim_number == "123456"
         assert claim.type is ClaimType.DECLARACION_SINIESTRO
 
     def test_extractor_receives_classification_and_both_bodies(self):
@@ -119,7 +119,7 @@ class TestFieldExtractorSeam:
 
         assert claim is not None
         assert claim.insurance_company == "Reale"
-        assert claim.nif == "H34140152"
+        assert claim.nif == "H12345678"
         assert claim.owner_name == "CDAD EJEMPLO"
 
 

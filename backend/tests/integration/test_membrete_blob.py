@@ -44,7 +44,7 @@ def test_blob_source_serves_pdf_generation(membrete_container):
         AZURITE_CONNECTION_STRING, membrete_container
     )
     pdf = generate_pdf_from_email(
-        "Compañía: Reale\nNif: H34140152\n",
+        "Compañía: Reale\nNif: H12345678\n",
         claim_type=ClaimType.DECLARACION_SINIESTRO,
         membrete_source=source,
     )

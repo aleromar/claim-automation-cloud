@@ -16,7 +16,7 @@ from pipeline.claim_data import ClaimData, ClaimType
 # ---------------------------------------------------------------------------
 
 NORMAL_SINIESTRO_SUBJECT = (
-    "2026/367095 Declaración de siniestro a colaborador NORMAL (H)Envio N-ANINXRBL"
+    "2026/123456 Declaración de siniestro a colaborador NORMAL (H)Envio N-EXAMPLE1"
 )
 
 NORMAL_SINIESTRO_BODY = """\
@@ -26,7 +26,7 @@ Comunicación para: AGENTE EJEMPLO LOPEZ - VILLANUEVA
  Declaración de siniestro NORMAL
 
 
-Fecha de envío: 25/02/2026 Hora: 17:29
+Fecha de envío: 01/02/2026 Hora: 17:29
 
 
 Datos de la Entidad:
@@ -34,13 +34,13 @@ Datos de la Entidad:
 
 Compañía: Reale
 
-N° Póliza: 8312400005262
+N° Póliza: 8310000000001
 
 Referª. Cía:
 
-Referencia Asitur: 2026/367095
+Referencia Asitur: 2026/123456
 
-Observaciones póliza: MODIFICADA: 20250504 18:06
+Observaciones póliza: MODIFICADA: 20240101 10:00
 
 
 Conditional XPath expression (./isExpatriate ) returned no results
@@ -48,15 +48,15 @@ Conditional XPath expression (./isExpatriate ) returned no results
 Datos del Asegurado:
 
 
-Tomador: CDAD DE PROPIETARIOS RESIDENCIAL SAN PED
+Tomador: CDAD DE PROPIETARIOS EDIFICIO EJEMPLO 7
 
-Nif: H34140152
+Nif: H12345678
 
 Producto: REALE 2 831-REA-2-NC COMUNIDADES Modalidad: Comunidades
 
-Continente: 6.643.650,00 Contenido: 3.066,30
+Continente: 1.000.000,00 Contenido: 5.000,00
 
-Fecha efecto: 05/06/2024
+Fecha efecto: 01/01/2020
 
 
 
@@ -64,23 +64,23 @@ Fecha efecto: 05/06/2024
 Datos del Siniestro:
 
 
-Dirección: CL SAN LAZARO 2
+Dirección: CL FICTICIA 12
 
-Localidad: SALDAÑA
+Localidad: VILLANUEVA
 
-Código Postal: 34100 Provincia: PALENCIA
+Código Postal: 34999 Provincia: PALENCIA
 
 Tipo siniestro: Extensivos NO agua
 
 Causa: Otras causas
 
-Descripción: por rotura de tuberia comunitaria del gasolio causa daños en el techo (terraza) de la residencia que ocupa todos los bajos de la comunidad
+Descripción: filtración de agua desde la cubierta causa manchas en el techo del portal del edificio
 
 Tipo: Reparable
 
-Fecha Ocurrencia: 25/02/2026
+Fecha Ocurrencia: 01/02/2026
 
-Daños Estéticos Continente : 3000 €
+Daños Estéticos Continente : 1000 €
 
 Histórico de Siniestros:
 
@@ -89,18 +89,18 @@ Implicados:
 
 
 
-‎ Asegurado: OPERARIO CDAD DE PROPIETARIOS RESIDENCIAL SAN PED
+‎ Asegurado: OPERARIO CDAD DE PROPIETARIOS EDIFICIO EJEMPLO 7
 ‎   Email:
-‎   Dirección: CL SAN LAZARO 2
+‎   Dirección: CL FICTICIA 12
 ‎   Tfno : 600000000 administrador Franja1: 00:00 - 00:00 Franja2: -
-‎ Perjudicado: OPERARIO CDAD DE PROPIETARIOS RESIDENCIAL SAN PED
+‎ Perjudicado: OPERARIO CDAD DE PROPIETARIOS EDIFICIO EJEMPLO 7
 ‎   Email:
-‎   Dirección: RESIDENCIA DE LA TERCERA EDAD EL CASTILLO
+‎   Dirección: RESIDENCIA FICTICIA LA COLINA
 ‎   Tfno : Franja1: Franja2:
 """
 
 URGENTE_SINIESTRO_SUBJECT = (
-    "2026/299057 Declaración de siniestro a colaborador URGENTE (H)Envio N-ANIJYAHQ"
+    "2026/654321 Declaración de siniestro a colaborador URGENTE (H)Envio N-EXAMPLE2"
 )
 
 URGENTE_SINIESTRO_BODY = """\
@@ -110,7 +110,7 @@ Comunicación para: AGENTE EJEMPLO LOPEZ - VILLANUEVA
  Declaración de siniestro URGENTE
 
 
-Fecha de envío: 16/02/2026 Hora: 12:37
+Fecha de envío: 02/02/2026 Hora: 12:37
 
 
 Datos de la Entidad:
@@ -118,13 +118,13 @@ Datos de la Entidad:
 
 Compañía: Reale
 
-N° Póliza: 8311600009743
+N° Póliza: 8310000000002
 
 Referª. Cía:
 
-Referencia Asitur: 2026/299057
+Referencia Asitur: 2026/654321
 
-Observaciones póliza: MODIFICADA: 20251005 16:02
+Observaciones póliza: MODIFICADA: 20240202 11:00
 
 
 Conditional XPath expression (./isExpatriate ) returned no results
@@ -132,36 +132,36 @@ Conditional XPath expression (./isExpatriate ) returned no results
 Datos del Asegurado:
 
 
-Tomador: COMUNI. PROPIETARIOS RONDA DON GARCIA 18
+Tomador: CDAD DE PROPIETARIOS AVENIDA INVENTADA 3
 
-Nif: H34173021
+Nif: H87654321
 
 Producto: 831-REA-1-NC COMUNIDADES Modalidad: Comunidades
 
-Continente: 1.655.009,45 Contenido: 1.281,78
+Continente: 2.000.000,00 Contenido: 3.000,00
 
-Fecha efecto: 04/11/2016
+Fecha efecto: 01/01/2018
 
 
 
 Datos del Siniestro:
 
 
-Dirección: RD DON GARCIA 20
+Dirección: AV INVENTADA 3
 
-Localidad: SALDAÑA
+Localidad: VILLANUEVA
 
-Código Postal: 34100 Provincia: PALENCIA
+Código Postal: 34999 Provincia: PALENCIA
 
 Tipo siniestro: Daños por agua
 
 Causa: Rotura de Tubería Empotrada
 
-Descripción: cae agua por tubería vista en garaje, no hay daños, límite 300€ al año
+Descripción: gotea agua por tubería vista en el trastero, sin daños aparentes, límite 500€ al año
 
 Tipo: Reparable
 
-Fecha Ocurrencia: 16/02/2026
+Fecha Ocurrencia: 02/02/2026
 
 Daños Estéticos Continente :
 
@@ -172,9 +172,9 @@ Implicados:
 
 
 
-‎ Asegurado: COMUNI. PROPIETARIOS RONDA DON GARCIA 18
+‎ Asegurado: CDAD DE PROPIETARIOS AVENIDA INVENTADA 3
 ‎   Email: cliente@example.com
-‎   Dirección: RD DON GARCIA 20
+‎   Dirección: AV INVENTADA 3
 ‎   Tfno : 600000000 operario (administracion) Franja1: 00:00 - 00:00 Franja2: -
 """
 
@@ -346,7 +346,7 @@ class TestNotAClaim:
 
         assert claim is not None
         assert claim.year == "2026"
-        assert claim.claim_number == "367095"
+        assert claim.claim_number == "123456"
 
 
 class TestGmailPayloadShapes:
