@@ -1,12 +1,12 @@
 """Worker wake logic (worker-skeleton REQ-2/4; gmail-client REQ-2/6):
-gate → preflight → maybe pipeline → heartbeat.
+gate → pipeline → heartbeat.
 
 The heartbeat is the run report, written LAST on every exit path (operator
-decision 2026-08-12): `ran` = pipeline completed (now carrying the probe's
-matched count), `failed` = preflight-transient or pipeline raised,
-`skipped_disabled` = gate exit, `skipped_no_access` = definitive credential
-failure at preflight (gmail-client, 2026-08-21). Pure orchestration with
-injected dependencies — fakes, no SDK mocks.
+decision 2026-08-12): `ran` = pipeline completed (carrying the probe's matched
+count), `failed` = pipeline raised, `skipped_disabled` = gate exit,
+`skipped_no_access` = the pipeline raised core `NoAccessError` — its preflight
+is the body's first step (REQ-2 amendment, 2026-08-21). Pure orchestration
+with injected dependencies — fakes, no SDK mocks.
 """
 
 import logging
@@ -58,25 +58,19 @@ def _worker_run(enabled: bool, matched: int = 1):
     store = FakeStateStore(enabled=enabled, events=events)
     pipeline_calls: list[str] = []
 
-    def preflight() -> None:
-        events.append("preflight")
-
     def pipeline() -> int:
         events.append("pipeline")
         pipeline_calls.append("called")
         return matched
 
-    outcome = run_worker(store, pipeline, preflight)
+    outcome = run_worker(store, pipeline)
     return outcome, store, events, pipeline_calls
 
 
-def _noop_preflight() -> None:
-    pass
-
-
-def test_disabled_writes_heartbeat_and_skips_preflight_and_pipeline():
-    # Gate order: enabled first (2026-08-12) — a disabled wake must not touch
-    # the SecretStore or Google at all (gmail-client REQ-2).
+def test_disabled_writes_heartbeat_and_skips_pipeline():
+    # Gate order: enabled first (2026-08-12) — a disabled wake never invokes
+    # the pipeline, whose first step (the preflight) touches the SecretStore
+    # and Google (gmail-client REQ-2).
     outcome, store, events, pipeline_calls = _worker_run(enabled=False)
     assert outcome == HeartbeatStatus.SKIPPED_DISABLED
     assert [hb.status for hb in store.heartbeats] == [HeartbeatStatus.SKIPPED_DISABLED]
@@ -84,15 +78,14 @@ def test_disabled_writes_heartbeat_and_skips_preflight_and_pipeline():
     assert events == ["read_enabled", "write_heartbeat"]
 
 
-def test_enabled_runs_preflight_then_pipeline_then_heartbeat():
+def test_enabled_runs_pipeline_then_heartbeat():
     outcome, store, events, pipeline_calls = _worker_run(enabled=True)
     assert outcome == HeartbeatStatus.RAN
     assert [hb.status for hb in store.heartbeats] == [HeartbeatStatus.RAN]
     assert pipeline_calls == ["called"]
     # The heartbeat is the run REPORT: written after the pipeline body completes,
-    # so `ran` means "ran to completion" (REQ-2 revision, 2026-08-12); the
-    # preflight precedes any polling (gmail-client REQ-2).
-    assert events == ["read_enabled", "preflight", "pipeline", "write_heartbeat"]
+    # so `ran` means "ran to completion" (REQ-2 revision, 2026-08-12).
+    assert events == ["read_enabled", "pipeline", "write_heartbeat"]
 
 
 def test_matched_count_lands_on_the_ran_heartbeat():
@@ -101,20 +94,21 @@ def test_matched_count_lands_on_the_ran_heartbeat():
     assert heartbeat.matched == 3
 
 
-def test_no_access_preflight_writes_skipped_no_access_and_skips_pipeline(caplog):
+def test_no_access_pipeline_writes_skipped_no_access(caplog):
+    # REQ-2 amendment (2026-08-21): the preflight is the pipeline body's first
+    # step, so a pipeline-raised NoAccessError IS the skip signal.
     events: list[str] = []
     store = FakeStateStore(enabled=True, events=events)
 
-    def no_access_preflight() -> None:
+    def no_access_pipeline() -> int:
         raise GmailNoAccessError("missing_token")
 
     with caplog.at_level(logging.INFO, logger="app.worker"):
-        outcome = run_worker(store, lambda: 0, no_access_preflight)
+        outcome = run_worker(store, no_access_pipeline)
     assert outcome == HeartbeatStatus.SKIPPED_NO_ACCESS
     (heartbeat,) = store.heartbeats
     assert heartbeat.status == HeartbeatStatus.SKIPPED_NO_ACCESS
     assert heartbeat.matched is None
-    assert events == ["read_enabled", "write_heartbeat"]  # no pipeline event
     # Structured skip reason precedes the outcome line (gmail-client REQ-2).
     lines = [r.getMessage() for r in caplog.records if r.name == "app.worker"]
     assert f"{WORKER_RUN_LOG_PREFIX} gmail_no_access reason=missing_token" in lines
@@ -122,46 +116,20 @@ def test_no_access_preflight_writes_skipped_no_access_and_skips_pipeline(caplog)
 
 def test_scheduler_classifies_the_neutral_contract_exception():
     # The wake contract is workload-agnostic: run_worker catches core's
-    # NoAccessError, never a Gmail-specific type — any workload's preflight
-    # (5c: Trello) signals dead credentials the same way. GmailNoAccessError
-    # participates by subclassing.
+    # NoAccessError, never a Gmail-specific type — any workload (5c: Trello)
+    # signals dead credentials the same way. GmailNoAccessError participates
+    # by subclassing.
     store = FakeStateStore(enabled=True, events=[])
 
     class OtherWorkloadNoAccess(NoAccessError):
         pass
 
-    def other_preflight() -> None:
+    def other_pipeline() -> int:
         raise OtherWorkloadNoAccess("credentials_revoked")
 
-    outcome = run_worker(store, lambda: 0, other_preflight)
+    outcome = run_worker(store, other_pipeline)
     assert outcome == HeartbeatStatus.SKIPPED_NO_ACCESS
     assert issubclass(GmailNoAccessError, NoAccessError)
-
-
-def test_transient_preflight_error_writes_failed_and_raises():
-    # A Google blip is NOT "needs reconnect" (REQ-1/2): failed, retried next wake.
-    events: list[str] = []
-    store = FakeStateStore(enabled=True, events=events)
-
-    def transient_preflight() -> None:
-        raise ConnectionError("google 5xx")
-
-    with pytest.raises(ConnectionError):
-        run_worker(store, lambda: 0, transient_preflight)
-    assert [hb.status for hb in store.heartbeats] == [HeartbeatStatus.FAILED]
-
-
-def test_pipeline_raised_no_access_is_failed_not_skip():
-    # Gate E5: the skip classification belongs to the preflight call ONLY — the
-    # same exception type leaking from the pipeline body is a run failure.
-    store = FakeStateStore(enabled=True, events=[])
-
-    def leaking_pipeline() -> int:
-        raise GmailNoAccessError("token_rejected")
-
-    with pytest.raises(GmailNoAccessError):
-        run_worker(store, leaking_pipeline, _noop_preflight)
-    assert [hb.status for hb in store.heartbeats] == [HeartbeatStatus.FAILED]
 
 
 def test_failed_pipeline_writes_failed_heartbeat_and_raises():
@@ -172,9 +140,11 @@ def test_failed_pipeline_writes_failed_heartbeat_and_raises():
         raise RuntimeError("pipeline blew up")
 
     # FAILED heartbeat lands, then the exception propagates so App Insights
-    # still records a failed invocation (REQ-2.3).
+    # still records a failed invocation (REQ-2.3). Covers the transient case
+    # too: a Google blip in the preflight is NOT "needs reconnect" (REQ-1/2) —
+    # it propagates as a non-NoAccessError and fails the run.
     with pytest.raises(RuntimeError, match="pipeline blew up"):
-        run_worker(store, failing_pipeline, _noop_preflight)
+        run_worker(store, failing_pipeline)
     assert [hb.status for hb in store.heartbeats] == [HeartbeatStatus.FAILED]
     assert events == ["read_enabled", "write_heartbeat"]
 
@@ -191,17 +161,17 @@ def test_heartbeat_timestamp_is_utc_aware(enabled):
 def test_store_error_propagates():
     # Storage faults must fail the invocation loudly (REQ-2.6) — no swallow-and-continue.
     with pytest.raises(ConnectionError):
-        run_worker(RaisingStateStore(), lambda: 0, _noop_preflight)
+        run_worker(RaisingStateStore(), lambda: 0)
 
 
 def test_heartbeat_write_error_propagates():
     with pytest.raises(ConnectionError):
-        run_worker(HeartbeatRaisingStateStore(), lambda: 0, _noop_preflight)
+        run_worker(HeartbeatRaisingStateStore(), lambda: 0)
 
 
 def test_heartbeat_write_error_propagates_on_skip_no_access_path():
-    # Gate E5: a storage fault inside the skip branch must escape, not be
-    # reclassified by any surrounding except.
+    # A storage fault inside the skip branch must escape, not be reclassified
+    # by any surrounding except (heartbeat writes stay outside every except).
     class EnabledHeartbeatRaisingStore:
         def read_enabled(self) -> bool:
             return True
@@ -209,11 +179,11 @@ def test_heartbeat_write_error_propagates_on_skip_no_access_path():
         def write_heartbeat(self, heartbeat: Heartbeat) -> None:
             raise ConnectionError("storage unreachable")
 
-    def no_access_preflight() -> None:
+    def no_access_pipeline() -> int:
         raise GmailNoAccessError("missing_token")
 
     with pytest.raises(ConnectionError):
-        run_worker(EnabledHeartbeatRaisingStore(), lambda: 0, no_access_preflight)
+        run_worker(EnabledHeartbeatRaisingStore(), no_access_pipeline)
 
 
 @pytest.mark.parametrize(
@@ -238,7 +208,7 @@ def test_failed_wake_logs_one_structured_line(caplog):
         raise RuntimeError("boom")
 
     with caplog.at_level(logging.INFO, logger="app.worker"), pytest.raises(RuntimeError):
-        run_worker(FakeStateStore(enabled=True, events=[]), failing_pipeline, _noop_preflight)
+        run_worker(FakeStateStore(enabled=True, events=[]), failing_pipeline)
     worker_lines = [r.getMessage() for r in caplog.records if r.name == "app.worker"]
     assert worker_lines == [f"{WORKER_RUN_LOG_PREFIX} outcome={HeartbeatStatus.FAILED.value}"]
 
@@ -246,11 +216,11 @@ def test_failed_wake_logs_one_structured_line(caplog):
 def test_skip_no_access_logs_exactly_one_outcome_line(caplog):
     store = FakeStateStore(enabled=True, events=[])
 
-    def no_access_preflight() -> None:
+    def no_access_pipeline() -> int:
         raise GmailNoAccessError("token_rejected")
 
     with caplog.at_level(logging.INFO, logger="app.worker"):
-        run_worker(store, lambda: 0, no_access_preflight)
+        run_worker(store, no_access_pipeline)
     outcome_lines = [
         r.getMessage()
         for r in caplog.records

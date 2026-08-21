@@ -25,6 +25,8 @@ _PROBE_LOG_PREFIX: Final = "worker_run probe"
 
 
 class GmailReader(Protocol):
+    def preflight(self) -> None: ...
+
     def list_unread_message_ids(self) -> list[str]: ...
 
     def get_subject(self, message_id: str) -> str: ...
@@ -33,10 +35,13 @@ class GmailReader(Protocol):
 def run_pipeline(gmail: GmailReader) -> int:
     """One read-only probe run: count of claim-subject-matching UNREAD emails.
 
+    The preflight is the body's first step (REQ-2 amendment, 2026-08-21): its
+    NoAccessError escapes for the scheduler to classify as `skipped_no_access`.
     The count is an upper bound on processable claims: a marker match doesn't
     guarantee the `YYYY/N` claim number or (for asistencia) a recognized
     service in the body — 5c's processing owns those failures.
     """
+    gmail.preflight()
     deadline = monotonic() + PROBE_DEADLINE_S
     message_ids = gmail.list_unread_message_ids()
     matched = 0

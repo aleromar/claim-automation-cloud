@@ -13,6 +13,7 @@ import pytest
 import pipeline.entry
 from pipeline.claim_data import CLAIM_SUBJECT_MARKERS
 from pipeline.entry import PROBE_DEADLINE_S, run_pipeline
+from pipeline.gmail_client import GmailNoAccessError
 
 CLAIM_SUBJECT = "AVISO: Declaración de siniestro a colaborador 2026/417"
 ASISTENCIA_SUBJECT = "Solicitud de asistencia a colaborador 2026/418"
@@ -24,8 +25,13 @@ class FakeReader:
     def __init__(self, subjects_by_id: dict[str, str]) -> None:
         self._subjects = subjects_by_id
         self.get_calls: list[str] = []
+        self.events: list[str] = []
+
+    def preflight(self) -> None:
+        self.events.append("preflight")
 
     def list_unread_message_ids(self) -> list[str]:
+        self.events.append("list")
         return list(self._subjects)
 
     def get_subject(self, message_id: str) -> str:
@@ -59,8 +65,32 @@ def test_probe_logs_structured_count(caplog):
     assert lines == ["worker_run probe matched=1 scanned=2"]
 
 
+def test_probe_runs_preflight_before_any_listing():
+    # REQ-2 amendment (2026-08-21): the preflight is the pipeline body's first
+    # step — no Gmail polling before it succeeds.
+    reader = FakeReader({"m1": CLAIM_SUBJECT})
+    run_pipeline(reader)
+    assert reader.events == ["preflight", "list"]
+
+
+def test_probe_preflight_no_access_propagates_without_listing():
+    # The skip signal escapes run_pipeline for the scheduler to classify
+    # (gmail-client REQ-2); nothing is listed after a failed preflight.
+    class NoAccessReader(FakeReader):
+        def preflight(self) -> None:
+            raise GmailNoAccessError("missing_token")
+
+    reader = NoAccessReader({"m1": CLAIM_SUBJECT})
+    with pytest.raises(GmailNoAccessError):
+        run_pipeline(reader)
+    assert reader.events == []
+
+
 def test_probe_reader_errors_propagate():
     class RaisingReader:
+        def preflight(self):
+            pass
+
         def list_unread_message_ids(self):
             raise ConnectionError("gmail down")
 

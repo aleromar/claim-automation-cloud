@@ -1,13 +1,13 @@
 """Scheduled worker wake logic (worker-skeleton spec; gmail-client REQ-2/6; D4/D5).
 
 One wake: read the `enabled` flag first (missing row reads as OFF — fail-safe,
-enforced by the state store), run the Gmail token preflight, invoke the pipeline
-only when both pass, and write a heartbeat LAST on every exit path. The
-heartbeat is the run *report* (operator decision 2026-08-12): `ran` = completed
-(carrying the probe's matched count), `failed` = preflight-transient or pipeline
-raised (heartbeat written, then re-raised so App Insights also records the
-failure), `skipped_disabled` = gate exit, `skipped_no_access` = definitive
-credential failure at preflight (gmail-client, 2026-08-21).
+enforced by the state store), invoke the pipeline — whose first step is the
+Gmail token preflight (REQ-2 amendment, 2026-08-21) — and write a heartbeat
+LAST on every exit path. The heartbeat is the run *report* (operator decision
+2026-08-12): `ran` = completed (carrying the probe's matched count), `failed` =
+pipeline raised (heartbeat written, then re-raised so App Insights also records
+the failure), `skipped_disabled` = gate exit, `skipped_no_access` = the
+pipeline raised core NoAccessError (definitive credential failure).
 
 Sync on purpose: the table client is sync and the Python worker runs plain-`def`
 functions off the host's event loop (state-store consumer constraint).
@@ -34,28 +34,25 @@ WORKER_RUN_LOG_PREFIX = "worker_run"  # App Insights: traces | where message sta
 def run_worker(
     store: StateStore,
     pipeline: Callable[[], int],
-    preflight: Callable[[], None],
 ) -> HeartbeatStatus:
     """Execute one wake. Storage faults propagate — the host records a failed
-    invocation (no swallow-and-continue). NoAccessError (the core wake contract) is classified as
-    a skip ONLY when raised by the preflight call itself (gate E5)."""
+    invocation (no swallow-and-continue). NoAccessError (the core wake contract,
+    raised by the pipeline's preflight first step) classifies as the skip; a
+    storage fault inside the skip branch still escapes (an except clause never
+    catches what its sibling handler raises)."""
     if not store.read_enabled():
         _report(store, HeartbeatStatus.SKIPPED_DISABLED)
         return HeartbeatStatus.SKIPPED_DISABLED
     try:
-        preflight()
+        matched = pipeline()
     except NoAccessError as exc:
         logger.warning("%s gmail_no_access reason=%s", WORKER_RUN_LOG_PREFIX, exc.reason)
         _report(store, HeartbeatStatus.SKIPPED_NO_ACCESS)
         return HeartbeatStatus.SKIPPED_NO_ACCESS
     except Exception:
-        # Transient token-endpoint failure: says nothing about token health —
-        # a failed run, retried by the next wake (REQ-1/2).
-        _report(store, HeartbeatStatus.FAILED)
-        raise
-    try:
-        matched = pipeline()
-    except Exception:
+        # Anything else — transient token-endpoint failure included — says
+        # nothing about token health: a failed run, retried by the next wake
+        # (REQ-1/2).
         _report(store, HeartbeatStatus.FAILED)
         raise
     _report(store, HeartbeatStatus.RAN, matched)
@@ -69,8 +66,8 @@ def _report(store: StateStore, outcome: HeartbeatStatus, matched: int | None = N
 
 
 def run_wake(store: StateStore) -> HeartbeatStatus:
-    """The single composition point of wake + preflight + probe (PR #15 review
-    M2; gmail-client REQ-6): the timer and the process-now endpoint both call
+    """The single composition point of wake + probe (PR #15 review M2;
+    gmail-client REQ-6): the timer and the process-now endpoint both call
     this. A fresh GmailClient per wake — nothing Gmail-side is shared across
     threads (P12 by non-sharing); the client does no secret reads and builds
     its HTTP client lazily (gates E3/M7), so constructing it ahead of the
@@ -78,7 +75,7 @@ def run_wake(store: StateStore) -> HeartbeatStatus:
     pipeline/entry.py; this wiring stands."""
     gmail = GmailClient(get_settings(), get_store())
     try:
-        return run_worker(store, lambda: run_pipeline(gmail), gmail.preflight)
+        return run_worker(store, lambda: run_pipeline(gmail))
     finally:
         gmail.close()
 

@@ -309,8 +309,7 @@ def test_run_pipeline_accepts_the_real_client(gmail):
     respx.get(f"{LIST_URL}/m2").mock(
         return_value=Response(200, json=_message("m2", [{"name": "Subject", "value": "spam"}]))
     )
-    gmail.preflight()
-    assert run_pipeline(gmail) == 1
+    assert run_pipeline(gmail) == 1  # run_pipeline mints via gmail.preflight()
 
 
 @respx.mock
