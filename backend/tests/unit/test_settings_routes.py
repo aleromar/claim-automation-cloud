@@ -19,7 +19,7 @@ from core.secret_store import (
     TRELLO_TOKEN,
     FileSecretStore,
 )
-from app.state_store import TrelloConfig, get_state_store
+from core.state_store import TrelloConfig, get_state_store
 from tests.conftest import OPERATOR
 
 SETTINGS_PATH = "/api/settings"

@@ -81,7 +81,7 @@ class ClaimData(BaseModel):
     def from_msg_data(
         cls, msg_data, extractor: "FieldExtractor | None" = None
     ) -> "ClaimData | None":
-        subject = cls._extract_subject(msg_data)
+        subject = cls.extract_subject(msg_data)
         raw_body = cls._decode_body(msg_data)
         # Conversion happens upstream of the seam: the regex extractor is
         # coupled to _html_to_plain's exact whitespace output (spec REQ-2).
@@ -108,7 +108,7 @@ class ClaimData(BaseModel):
         return None
 
     @staticmethod
-    def _extract_subject(msg_data) -> str | None:
+    def extract_subject(msg_data) -> str | None:
         headers = msg_data.get("payload", {}).get("headers", [])
         return next((h["value"] for h in headers if h["name"] == "Subject"), None)
 
@@ -184,3 +184,35 @@ class ClaimData(BaseModel):
         text = "\n".join(line.strip() for line in text.split("\n"))
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
+
+
+# Card content builders — laptop parity (daemon/trello.py:12-60), pure
+# functions of ClaimData so they test without any client. A None town crashes
+# on .upper() exactly like the laptop did — the per-email boundary owns it.
+
+
+def build_card_name(claim: ClaimData) -> str:
+    return f"{claim.town.upper()} {claim.year}/{claim.claim_number} {claim.owner_name}"
+
+
+def build_card_description(claim: ClaimData) -> str:
+    return (
+        f"Empresa de seguros: {claim.insurance_company}\n"
+        f"NIF: {claim.nif}\n"
+        f"Dirección: {claim.address}\n"
+        f"Teléfono: {claim.phone_number}\n"
+        f"Población: {claim.town}\n"
+        f"Descripción: {claim.description}\n"
+    )
+
+
+def build_card_comment(claim: ClaimData) -> str:
+    if claim.type is ClaimType.SOLICITUD_ASISTENCIA_BRICO:
+        return f"@board Nueva brico asistencia en {claim.town.upper()}"
+    if claim.type is ClaimType.SOLICITUD_ASISTENCIA_ENVIO_PROFESIONALES:
+        return f"@board Nuevo envío de profesionales en {claim.town.upper()}"
+    if claim.type is ClaimType.COMUNICACION_A_COLABORADOR:
+        return f"@board {claim.observaciones}"
+    if claim.type is ClaimType.DECLARACION_URGENTE:
+        return f"@board Parte URGENTE en {claim.town.upper()}"
+    return f"@board Parte nuevo en {claim.town.upper()}"

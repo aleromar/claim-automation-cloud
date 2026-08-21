@@ -5,17 +5,21 @@ down (state-store spec REQ-5.4 — no skip logic).
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
 
 from core.config import Settings
-from app.state_store import (
+from core.state_store import (
+    HEARTBEAT_HISTORY_PARTITION,
+    RUN_LEASE_STALE_S,
+    ClaimRecord,
     ALL_TABLES,
     ENABLED_PROP,
     ENABLED_ROW,
+    HEARTBEAT_TABLE,
     WORKER_STATE_PARTITION,
     WORKER_STATE_TABLE,
     Heartbeat,
@@ -169,7 +173,7 @@ def test_heartbeat_matched_roundtrip(store):
 def test_heartbeat_row_without_matched_reads_none(service, prefix, store):
     # gmail-client REQ-4: rows written before 5b lack the property entirely —
     # they must read as matched=None, no migration.
-    from app.state_store import (
+    from core.state_store import (
         HEARTBEAT_AT_PROP,
         HEARTBEAT_PARTITION,
         HEARTBEAT_ROW,
@@ -208,3 +212,137 @@ def test_heartbeat_replace_clears_stale_matched(store):
     assert got is not None
     assert got.status == HeartbeatStatus.FAILED
     assert got.matched is None
+
+
+# --- pipeline-wiring (5c): ClaimHistory ledger, heartbeat dual-write, run lease ---
+
+
+def _record(claim_ref: str = "2026/417", card_url: str = "https://trello.com/c/abc") -> ClaimRecord:
+    return ClaimRecord(
+        at=datetime.now(UTC),
+        claim_ref=claim_ref,
+        subject=f"Declaración de siniestro a colaborador {claim_ref}",
+        type="DECLARACION_SINIESTRO",
+        town="Madrid",
+        owner="Nombre Apellido",
+        card_url=card_url,
+    )
+
+
+def test_claim_missing_reads_none(store):
+    assert store.get_claim("2026/999") is None
+
+
+def test_claim_record_roundtrip(store):
+    record = _record()
+    store.record_claim(record)
+    got = store.get_claim("2026/417")
+    assert got is not None
+    assert got.claim_ref == "2026/417"
+    assert got.subject == record.subject
+    assert got.type == "DECLARACION_SINIESTRO"
+    assert got.town == "Madrid"
+    assert got.owner == "Nombre Apellido"
+    assert got.card_url == record.card_url
+
+
+def test_claim_record_rewrite_is_idempotent(store):
+    # Ledger semantics (REQ-4): re-recording the same claim ref replaces, never
+    # raises — the redo path after a crash-before-relabel must be safe.
+    store.record_claim(_record(card_url="https://trello.com/c/first"))
+    store.record_claim(_record(card_url="https://trello.com/c/second"))
+    got = store.get_claim("2026/417")
+    assert got is not None
+    assert got.card_url == "https://trello.com/c/second"
+
+
+def test_claim_optional_fields_roundtrip_as_none(store):
+    store.record_claim(
+        ClaimRecord(
+            at=datetime.now(UTC),
+            claim_ref="2026/418",
+            subject="s",
+            type="SOLICITUD_ASISTENCIA",
+            card_url="",
+        )
+    )
+    got = store.get_claim("2026/418")
+    assert got is not None
+    assert got.town is None
+    assert got.owner is None
+
+
+def test_heartbeat_counts_roundtrip_and_replace_clears(store):
+    # pipeline-wiring REQ-5: counts ride the last-run row; REPLACE drops them
+    # on countless outcomes (same E8 stance as matched).
+    store.write_heartbeat(
+        Heartbeat(
+            at=datetime.now(UTC), status=HeartbeatStatus.RAN, processed=3, failed=1, failed_total=2
+        )
+    )
+    got = store.read_heartbeat()
+    assert got is not None
+    assert (got.processed, got.failed, got.failed_total) == (3, 1, 2)
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.SKIPPED_DISABLED))
+    got = store.read_heartbeat()
+    assert got is not None
+    assert (got.processed, got.failed, got.failed_total) == (None, None, None)
+
+
+def test_heartbeat_dual_write_appends_history(service, prefix, store):
+    # REQ-5: every write lands twice — the last-run REPLACE row plus an
+    # append-only history row (inverted-timestamp RowKey → newest first).
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN, processed=1))
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.FAILED))
+    table = service.get_table_client(prefix + HEARTBEAT_TABLE)
+    rows = list(table.query_entities(f"PartitionKey eq '{HEARTBEAT_HISTORY_PARTITION}'"))
+    assert len(rows) == 2
+    # Ascending RowKey scan = newest first (inversion) — the FAILED write is second.
+    statuses = [row["status"] for row in rows]
+    assert statuses == ["failed", "ran"]
+
+
+def test_run_lease_mutual_exclusion(store):
+    # REQ-12: exactly one holder; a fresh lease blocks; release frees.
+    assert store.try_acquire_run_lease(datetime.now(UTC)) is True
+    assert store.try_acquire_run_lease(datetime.now(UTC)) is False
+    store.release_run_lease()
+    assert store.try_acquire_run_lease(datetime.now(UTC)) is True
+    store.release_run_lease()
+
+
+def test_run_lease_stale_takeover(store):
+    # A crashed run's lease expires after the staleness window.
+    long_ago = datetime.now(UTC) - timedelta(seconds=RUN_LEASE_STALE_S + 60)
+    assert store.try_acquire_run_lease(long_ago) is True  # held with an old stamp
+    assert store.try_acquire_run_lease(datetime.now(UTC)) is True  # taken over
+    store.release_run_lease()
+
+
+def test_run_lease_release_without_hold_is_noop(store):
+    store.release_run_lease()  # must not raise
+
+
+def test_run_lease_single_winner_under_concurrency(store):
+    # P12 guard for the new methods: N concurrent acquires, exactly one winner.
+    now = datetime.now(UTC)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(lambda _: store.try_acquire_run_lease(now), range(8)))
+    assert results.count(True) == 1
+    store.release_run_lease()
+
+
+def test_new_accessors_safe_under_concurrent_use(store):
+    # P12 serialization guard extended to the 5c accessors (same smoke contract
+    # as test_shared_store_is_safe_under_concurrent_use).
+    def hammer(worker_index: int) -> int:
+        for n in range(10):
+            store.record_claim(_record(claim_ref=f"2026/{worker_index}00{n}"))
+            assert store.get_claim(f"2026/{worker_index}00{n}") is not None
+            store.write_heartbeat(
+                Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN, processed=n)
+            )
+        return worker_index
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        assert sorted(executor.map(hammer, range(8))) == list(range(8))

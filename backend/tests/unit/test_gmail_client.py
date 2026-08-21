@@ -21,7 +21,7 @@ from pipeline.gmail_client import (
     GmailNoAccessError,
 )
 from core.secret_store import GMAIL_REFRESH_TOKEN, GOOGLE_CLIENT_SECRET, FileSecretStore
-from pipeline.entry import probe
+from pipeline.entry import GmailPipeline
 
 CLIENT_ID = "client-id-123"
 TOKEN_URL = "https://idp.test/token"
@@ -288,28 +288,11 @@ def test_get_subject_missing_payload_fails_loud(gmail):
         gmail.get_subject("m1")
 
 
-@respx.mock
-def test_probe_accepts_the_real_client(gmail):
-    # Gate 3 M8: the only proof GmailClient satisfies the GmailReader protocol —
-    # every other test uses hand-rolled fakes, so a method rename would ship
-    # green and AttributeError on the first connected wake.
-    _mint_ok()
-    respx.get(LIST_URL).mock(
-        return_value=Response(200, json={"messages": [{"id": "m1"}, {"id": "m2"}]})
-    )
-    respx.get(f"{LIST_URL}/m1").mock(
-        return_value=Response(
-            200,
-            json=_message(
-                "m1",
-                [{"name": "Subject", "value": "Declaración de siniestro a colaborador 2026/9"}],
-            ),
-        )
-    )
-    respx.get(f"{LIST_URL}/m2").mock(
-        return_value=Response(200, json=_message("m2", [{"name": "Subject", "value": "spam"}]))
-    )
-    assert probe(gmail) == 1  # probe mints via gmail.preflight()
+def test_real_client_satisfies_the_pipeline_protocol(gmail):
+    # Gate 3 M8 carried into 5c: every process_mailbox test uses hand-rolled
+    # fakes, so a client method rename would ship green and AttributeError on
+    # the first connected wake — the runtime_checkable protocol catches it.
+    assert isinstance(gmail, GmailPipeline)
 
 
 @respx.mock
@@ -330,3 +313,134 @@ def test_api_calls_before_preflight_are_programming_errors(gmail):
         gmail.list_unread_message_ids()
     with pytest.raises(RuntimeError, match="preflight"):
         gmail.get_subject("m1")
+
+
+# --- pipeline-wiring (5c): filtered list, full fetch, label mutations ---
+
+LABELS_URL = f"{API_BASE}/gmail/v1/users/me/labels"
+
+
+@respx.mock
+def test_list_accepts_server_side_query(gmail):
+    # 5c REQ-1: the subject filter rides the same list call as `q`.
+    _mint_ok()
+    route = respx.get(LIST_URL).mock(return_value=Response(200, json={"messages": [{"id": "m1"}]}))
+    gmail.preflight()
+    assert gmail.list_unread_message_ids(query='subject:"Marker One" OR subject:"Marker Two"') == [
+        "m1"
+    ]
+    params = dict(route.calls.last.request.url.params)
+    assert params["q"] == 'subject:"Marker One" OR subject:"Marker Two"'
+    assert params["labelIds"] == "UNREAD"
+    assert params["maxResults"] == str(PROBE_MAX_RESULTS)
+
+
+@respx.mock
+def test_list_without_query_keeps_probe_shape(gmail):
+    # The 5b shape (no q param) must survive for callers that pass no filter.
+    _mint_ok()
+    route = respx.get(LIST_URL).mock(return_value=Response(200, json={}))
+    gmail.preflight()
+    assert gmail.list_unread_message_ids() == []
+    assert "q" not in dict(route.calls.last.request.url.params)
+
+
+@respx.mock
+def test_get_message_fetches_full_format(gmail):
+    # 5c REQ-1: ONE format=full fetch per id — bodies for the 5a seam and
+    # internalDate for the client-side sort come from the same response.
+    _mint_ok()
+    full = {"id": "m1", "internalDate": "1755772800000", "payload": {"headers": []}}
+    route = respx.get(f"{LIST_URL}/m1").mock(return_value=Response(200, json=full))
+    gmail.preflight()
+    assert gmail.get_message("m1") == full
+    assert dict(route.calls.last.request.url.params)["format"] == "full"
+
+
+@respx.mock
+def test_modify_labels_posts_add_and_remove(gmail):
+    import json
+
+    _mint_ok()
+    route = respx.post(f"{LIST_URL}/m1/modify").mock(return_value=Response(200, json={}))
+    gmail.preflight()
+    gmail.modify_labels("m1", add_label_ids=["Label_7"], remove_label_ids=["UNREAD"])
+    sent = json.loads(route.calls.last.request.content)
+    assert sent == {"addLabelIds": ["Label_7"], "removeLabelIds": ["UNREAD"]}
+
+
+@respx.mock
+def test_get_or_create_label_id_matches_case_insensitively(gmail):
+    # Laptop parity (main.py:196-209): existing labels match case-insensitively.
+    _mint_ok()
+    respx.get(LABELS_URL).mock(
+        return_value=Response(200, json={"labels": [{"id": "Label_7", "name": "Procesado"}]})
+    )
+    gmail.preflight()
+    assert gmail.get_or_create_label_id("procesado") == "Label_7"
+
+
+@respx.mock
+def test_get_or_create_label_id_creates_when_missing(gmail):
+    import json
+
+    _mint_ok()
+    respx.get(LABELS_URL).mock(return_value=Response(200, json={"labels": []}))
+    create = respx.post(LABELS_URL).mock(
+        return_value=Response(200, json={"id": "Label_9", "name": "failed"})
+    )
+    gmail.preflight()
+    assert gmail.get_or_create_label_id("failed") == "Label_9"
+    assert json.loads(create.calls.last.request.content)["name"] == "failed"
+
+
+@respx.mock
+def test_label_ids_are_cached_per_client(gmail):
+    # 5c REQ-6: resolve once per run — the laptop re-listed labels on every
+    # modify (2+ calls per email); the per-instance cache removes that.
+    _mint_ok()
+    listing = respx.get(LABELS_URL).mock(
+        return_value=Response(200, json={"labels": [{"id": "Label_7", "name": "procesado"}]})
+    )
+    gmail.preflight()
+    assert gmail.get_or_create_label_id("procesado") == "Label_7"
+    assert gmail.get_or_create_label_id("PROCESADO") == "Label_7"
+    assert listing.call_count == 1
+
+
+@respx.mock
+def test_mutations_before_preflight_are_programming_errors(gmail):
+    with pytest.raises(RuntimeError, match="preflight"):
+        gmail.modify_labels("m1", add_label_ids=[], remove_label_ids=["UNREAD"])
+    with pytest.raises(RuntimeError, match="preflight"):
+        gmail.get_or_create_label_id("procesado")
+    with pytest.raises(RuntimeError, match="preflight"):
+        gmail.get_message("m1")
+
+
+@respx.mock
+def test_count_messages_with_label_pages_once_and_caps(gmail):
+    # 5c REQ-5 gauge: one page; a nextPageToken means "more than the page" —
+    # disclosed as the 101 cap rather than a second request.
+    _mint_ok()
+    respx.get(LIST_URL).mock(
+        return_value=Response(200, json={"messages": [{"id": f"m{i}"} for i in range(3)]})
+    )
+    gmail.preflight()
+    assert gmail.count_messages_with_label("Label_9") == 3
+
+
+@respx.mock
+def test_count_messages_with_label_caps_at_101_when_more_pages(gmail):
+    _mint_ok()
+    respx.get(LIST_URL).mock(
+        return_value=Response(
+            200,
+            json={
+                "messages": [{"id": f"m{i}"} for i in range(100)],
+                "nextPageToken": "next",
+            },
+        )
+    )
+    gmail.preflight()
+    assert gmail.count_messages_with_label("Label_9") == 101

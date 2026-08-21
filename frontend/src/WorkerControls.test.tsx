@@ -7,6 +7,9 @@ type HeartbeatBody = {
   at: string;
   status: string;
   matched?: number | null;
+  processed?: number | null;
+  failed?: number | null;
+  failed_total?: number | null;
 } | null;
 
 const statusResponse = (enabled: boolean, heartbeat: HeartbeatBody) => () =>
@@ -317,5 +320,87 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
     );
     // The heartbeat row carries the truth (`failed`) — the refresh surfaces it.
     expect(statusCalls(spy)).toBe(2);
+  });
+});
+
+describe("run counts and the failed-state gauge (pipeline-wiring REQ-10)", () => {
+  it("renders processed/failed counts with the gauge on a ran heartbeat", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T12:00:00Z",
+        status: "ran",
+        processed: 3,
+        failed: 1,
+        failed_total: 2,
+      }),
+    });
+    render(<WorkerControls />);
+    await screen.findByText(/3 processed, 1 failed · 2 in failed state/);
+  });
+
+  it("renders zero counts (0 is a successful, informative run)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T12:00:00Z",
+        status: "ran",
+        processed: 0,
+        failed: 0,
+        failed_total: 0,
+      }),
+    });
+    render(<WorkerControls />);
+    await screen.findByText(/0 processed, 0 failed · 0 in failed state/);
+  });
+
+  it("renders the gauge cap as 100+", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T12:00:00Z",
+        status: "ran",
+        processed: 1,
+        failed: 0,
+        failed_total: 101,
+      }),
+    });
+    render(<WorkerControls />);
+    await screen.findByText(/100\+ in failed state/);
+  });
+
+  it("omits the gauge segment when failed_total is null (gauge unavailable)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T12:00:00Z",
+        status: "ran",
+        processed: 2,
+        failed: 0,
+        failed_total: null,
+      }),
+    });
+    render(<WorkerControls />);
+    await screen.findByText(/2 processed, 0 failed$/);
+    expect(screen.queryByText(/in failed state/)).toBeNull();
+  });
+
+  it("keeps rendering the legacy matched line on pre-5c rows", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T12:00:00Z",
+        status: "ran",
+        matched: 3,
+      }),
+    });
+    render(<WorkerControls />);
+    await screen.findByText(/3 matching emails/);
+  });
+
+  it("labels a skipped_busy heartbeat (REQ-12)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T12:00:00Z",
+        status: "skipped_busy",
+      }),
+    });
+    render(<WorkerControls />);
+    await screen.findByText(/skipped \(another run in progress\)/);
   });
 });

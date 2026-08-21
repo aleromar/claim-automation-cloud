@@ -13,8 +13,14 @@ import logging
 import threading
 from enum import StrEnum
 from functools import lru_cache
+from time import time_ns
 
-from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+from azure.core import MatchConditions
+from azure.core.exceptions import (
+    ResourceExistsError,
+    ResourceModifiedError,
+    ResourceNotFoundError,
+)
 from azure.data.tables import (
     TableClient,
     TableEntity,
@@ -48,16 +54,34 @@ WORKER_STATE_PARTITION = "worker"
 ENABLED_ROW = "enabled"
 HEARTBEAT_PARTITION = "run"
 HEARTBEAT_ROW = "last"
+HEARTBEAT_HISTORY_PARTITION = "history"  # append-only run log (pipeline-wiring REQ-5)
 TRELLO_CONFIG_PARTITION = "trello"
 TRELLO_CONFIG_ROW = "config"
+CLAIM_PARTITION = "claim"  # ClaimHistory ledger rows (pipeline-wiring REQ-4)
+RUN_LEASE_ROW = "run_lock"  # timer × process-now mutual exclusion (REQ-12)
+
+# A crashed run's lease expires after this window — a dead holder must never
+# deadlock the worker (pipeline-wiring REQ-12).
+RUN_LEASE_STALE_S = 600
 
 # Entity property names.
 ENABLED_PROP = "enabled"
 HEARTBEAT_AT_PROP = "at"
 HEARTBEAT_STATUS_PROP = "status"
 HEARTBEAT_MATCHED_PROP = "matched"
+HEARTBEAT_PROCESSED_PROP = "processed"
+HEARTBEAT_FAILED_PROP = "failed"
+HEARTBEAT_FAILED_TOTAL_PROP = "failed_total"
 BOARD_ID_PROP = "board_id"
 LIST_ID_PROP = "list_id"
+CLAIM_REF_PROP = "claim_ref"
+CLAIM_AT_PROP = "at"
+CLAIM_SUBJECT_PROP = "subject"
+CLAIM_TYPE_PROP = "type"
+CLAIM_TOWN_PROP = "town"
+CLAIM_OWNER_PROP = "owner"
+CLAIM_CARD_URL_PROP = "card_url"
+RUN_LEASE_AT_PROP = "at"
 
 # The Table service reports a missing entity ("ResourceNotFound", or
 # "EntityNotFound" from some responses) distinctly from a missing table
@@ -70,6 +94,7 @@ class HeartbeatStatus(StrEnum):
     RAN = "ran"  # pipeline ran to completion
     FAILED = "failed"  # pipeline raised (added by worker-skeleton, 2026-08-12)
     SKIPPED_NO_ACCESS = "skipped_no_access"  # token preflight failed (gmail-client, 2026-08-21)
+    SKIPPED_BUSY = "skipped_busy"  # run lease held by another invocation (pipeline-wiring, REQ-12)
 
 
 class Heartbeat(BaseModel):
@@ -77,7 +102,34 @@ class Heartbeat(BaseModel):
     status: HeartbeatStatus
     # Probe count for `ran` outcomes (gmail-client REQ-4); None otherwise and on
     # rows written before 5b — Table Storage has no null, so None is "property absent".
+    # No longer written since 5c (superseded by the counts below); kept readable.
     matched: int | None = Field(default=None, ge=0)
+    # Run counts + failed-label gauge (pipeline-wiring REQ-5); None on pre-5c rows.
+    processed: int | None = Field(default=None, ge=0)
+    failed: int | None = Field(default=None, ge=0)
+    failed_total: int | None = Field(default=None, ge=0)
+
+
+class RunCounts(BaseModel):
+    """What one pipeline run reports back across the wake contract
+    (pipeline-wiring REQ-5): the scheduler maps these onto the heartbeat."""
+
+    processed: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    failed_total: int | None = Field(default=None, ge=0)  # None = gauge unavailable
+
+
+class ClaimRecord(BaseModel):
+    """One ClaimHistory ledger row (pipeline-wiring REQ-4): 'successfully
+    processed once' — NOT a mirror of the Trello card's current state."""
+
+    at: AwareDatetime
+    claim_ref: str  # "YYYY/N" — the RowKey stores it '/'→'-' (keys forbid '/')
+    subject: str
+    type: str  # ClaimType.name as a string — core must not import pipeline
+    town: str | None = None
+    owner: str | None = None
+    card_url: str
 
 
 class TrelloConfig(BaseModel):
@@ -148,17 +200,42 @@ class StateStore:
             )
 
     def write_heartbeat(self, heartbeat: Heartbeat) -> None:
-        entity = {
-            "PartitionKey": HEARTBEAT_PARTITION,
-            "RowKey": HEARTBEAT_ROW,
+        """Dual-write (pipeline-wiring REQ-5): the last-run REPLACE row (the
+        dashboard card contract) plus an append-only history row — the scheduler
+        stays unaware of the second write."""
+        props: dict = {
             HEARTBEAT_AT_PROP: heartbeat.at,
             HEARTBEAT_STATUS_PROP: heartbeat.status.value,
         }
-        if heartbeat.matched is not None:
-            entity[HEARTBEAT_MATCHED_PROP] = heartbeat.matched
+        for prop, value in (
+            (HEARTBEAT_MATCHED_PROP, heartbeat.matched),
+            (HEARTBEAT_PROCESSED_PROP, heartbeat.processed),
+            (HEARTBEAT_FAILED_PROP, heartbeat.failed),
+            (HEARTBEAT_FAILED_TOTAL_PROP, heartbeat.failed_total),
+        ):
+            if value is not None:
+                props[prop] = value
+        # Inverted wall-clock ns: ascending RowKey scans read newest first.
+        history_row_key = f"{2**63 - time_ns():020d}"
         with self._lock:
-            # REPLACE (not MERGE) so a countless outcome drops any stale matched.
-            self._table(HEARTBEAT_TABLE).upsert_entity(entity, mode=UpdateMode.REPLACE)
+            table = self._table(HEARTBEAT_TABLE)
+            # REPLACE (not MERGE) so a countless outcome drops any stale counts.
+            table.upsert_entity(
+                {"PartitionKey": HEARTBEAT_PARTITION, "RowKey": HEARTBEAT_ROW, **props},
+                mode=UpdateMode.REPLACE,
+            )
+            try:
+                table.create_entity(
+                    {
+                        "PartitionKey": HEARTBEAT_HISTORY_PARTITION,
+                        "RowKey": history_row_key,
+                        **props,
+                    }
+                )
+            except Exception:
+                # Diagnostics only (Gate 3 M3): a failed history append must not
+                # fail a run whose last-run row landed — same stance as the gauge.
+                logger.warning("heartbeat history append failed — last-run row written")
 
     def write_trello_config(self, config: TrelloConfig) -> None:
         with self._lock:
@@ -188,7 +265,85 @@ class StateStore:
             at=entity[HEARTBEAT_AT_PROP],
             status=HeartbeatStatus(entity[HEARTBEAT_STATUS_PROP]),
             matched=entity.get(HEARTBEAT_MATCHED_PROP),
+            processed=entity.get(HEARTBEAT_PROCESSED_PROP),
+            failed=entity.get(HEARTBEAT_FAILED_PROP),
+            failed_total=entity.get(HEARTBEAT_FAILED_TOTAL_PROP),
         )
+
+    def record_claim(self, record: ClaimRecord) -> None:
+        """Upsert, not insert: re-recording after a crash-before-relabel redo
+        must be safe (REQ-4 ledger semantics)."""
+        entity = {
+            "PartitionKey": CLAIM_PARTITION,
+            "RowKey": record.claim_ref.replace("/", "-"),
+            CLAIM_AT_PROP: record.at,
+            CLAIM_REF_PROP: record.claim_ref,
+            CLAIM_SUBJECT_PROP: record.subject,
+            CLAIM_TYPE_PROP: record.type,
+            CLAIM_CARD_URL_PROP: record.card_url,
+        }
+        if record.town is not None:
+            entity[CLAIM_TOWN_PROP] = record.town
+        if record.owner is not None:
+            entity[CLAIM_OWNER_PROP] = record.owner
+        with self._lock:
+            self._table(CLAIM_HISTORY_TABLE).upsert_entity(entity, mode=UpdateMode.REPLACE)
+
+    def get_claim(self, claim_ref: str) -> ClaimRecord | None:
+        entity = self._get_entity_or_none(
+            CLAIM_HISTORY_TABLE, CLAIM_PARTITION, claim_ref.replace("/", "-")
+        )
+        if entity is None:
+            return None
+        return ClaimRecord(
+            at=entity[CLAIM_AT_PROP],
+            claim_ref=entity[CLAIM_REF_PROP],
+            subject=entity[CLAIM_SUBJECT_PROP],
+            type=entity[CLAIM_TYPE_PROP],
+            town=entity.get(CLAIM_TOWN_PROP),
+            owner=entity.get(CLAIM_OWNER_PROP),
+            card_url=entity[CLAIM_CARD_URL_PROP],
+        )
+
+    def try_acquire_run_lease(self, now: AwareDatetime) -> bool:
+        """Cross-process mutual exclusion (REQ-12): insert-if-absent is the
+        atomic acquire; a stale row (crashed holder) is taken over via an
+        ETag-CONDITIONAL replace — two processes racing the takeover would both
+        pass the staleness read, but only one wins the 412 race (Gate 3 M1;
+        the in-process lock cannot serialize across host instances)."""
+        entity = {
+            "PartitionKey": WORKER_STATE_PARTITION,
+            "RowKey": RUN_LEASE_ROW,
+            RUN_LEASE_AT_PROP: now,
+        }
+        with self._lock:
+            table = self._table(WORKER_STATE_TABLE)
+            try:
+                table.create_entity(entity)
+                return True
+            except ResourceExistsError:
+                existing = table.get_entity(WORKER_STATE_PARTITION, RUN_LEASE_ROW)
+                if (now - existing[RUN_LEASE_AT_PROP]).total_seconds() <= RUN_LEASE_STALE_S:
+                    return False
+                try:
+                    table.update_entity(
+                        entity,
+                        mode=UpdateMode.REPLACE,
+                        etag=existing.metadata["etag"],
+                        match_condition=MatchConditions.IfNotModified,
+                    )
+                    return True
+                except (ResourceModifiedError, ResourceNotFoundError):
+                    # Another taker won (412), or the holder released between
+                    # our read and update — either way, not ours this wake.
+                    return False
+
+    def release_run_lease(self) -> None:
+        with self._lock:
+            try:
+                self._table(WORKER_STATE_TABLE).delete_entity(WORKER_STATE_PARTITION, RUN_LEASE_ROW)
+            except ResourceNotFoundError:
+                pass
 
 
 def state_store_from_settings(settings: Settings) -> StateStore:
