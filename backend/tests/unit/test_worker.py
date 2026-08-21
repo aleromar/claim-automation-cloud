@@ -231,74 +231,20 @@ def test_skip_no_access_logs_exactly_one_outcome_line(caplog):
     ]
 
 
-class CountingFakeGmailClient:
-    """run_wake's composition seam (gmail-client REQ-6): fresh instance per call."""
-
-    instances: list["CountingFakeGmailClient"] = []
-
-    def __init__(self, settings, secret_store) -> None:
-        self.closed = False
-        CountingFakeGmailClient.instances.append(self)
-
-    def preflight(self) -> None:
-        pass
-
-    def list_unread_message_ids(self) -> list[str]:
-        return []
-
-    def get_subject(self, message_id: str) -> str:  # pragma: no cover
-        return ""
-
-    def close(self) -> None:
-        self.closed = True
-
-
-@pytest.fixture
-def fake_gmail(monkeypatch):
-    CountingFakeGmailClient.instances = []
-    monkeypatch.setattr("app.worker.GmailClient", CountingFakeGmailClient)
-    monkeypatch.setattr("app.worker.get_store", lambda: object())
-    return CountingFakeGmailClient
-
-
-def test_run_wake_builds_a_fresh_client_per_call_and_closes_it(monkeypatch, fake_gmail):
+def test_run_wake_delegates_to_the_pipeline_entry_point(monkeypatch):
+    # REQ-6 2nd amendment (2026-08-21): run_wake ≡ run_worker(store, run_pipeline)
+    # — the pipeline owns its Gmail client; nothing Gmail-side exists at this
+    # layer (the fresh-client/close guards live in test_pipeline_entry.py).
     from app.worker import run_wake
 
+    monkeypatch.setattr("app.worker.run_pipeline", lambda: 2)
     store = FakeStateStore(enabled=True, events=[])
-    run_wake(store)
-    run_wake(store)
-    assert len(fake_gmail.instances) == 2
-    assert fake_gmail.instances[0] is not fake_gmail.instances[1]
-    assert all(instance.closed for instance in fake_gmail.instances)
+    assert run_wake(store) == HeartbeatStatus.RAN
+    (heartbeat,) = store.heartbeats
+    assert heartbeat.matched == 2
 
 
-def test_run_wake_closes_client_even_when_pipeline_fails(monkeypatch, fake_gmail):
-    from app.worker import run_wake
-
-    class FailingListClient(CountingFakeGmailClient):
-        def list_unread_message_ids(self) -> list[str]:
-            raise ConnectionError("gmail down")
-
-    monkeypatch.setattr("app.worker.GmailClient", FailingListClient)
-    store = FakeStateStore(enabled=True, events=[])
-    with pytest.raises(ConnectionError):
-        run_wake(store)
-    assert fake_gmail.instances[-1].closed
-
-
-def test_run_wake_disabled_constructs_client_without_side_effects(fake_gmail):
-    # The constructor is I/O-free (gate E3), so building it pre-gate is safe;
-    # what matters is that no preflight/list ever runs on the disabled path —
-    # covered by the events assertion in the disabled test above. Here: the
-    # instance still gets closed.
-    from app.worker import run_wake
-
-    store = FakeStateStore(enabled=False, events=[])
-    assert run_wake(store) == HeartbeatStatus.SKIPPED_DISABLED
-    assert fake_gmail.instances[-1].closed
-
-
-def test_scheduled_worker_uses_cached_accessor(monkeypatch, fake_gmail):
+def test_scheduled_worker_uses_cached_accessor(monkeypatch):
     # worker-controls REQ-6.2: the timer composes via get_state_store() (shared,
     # cached) — supersedes per-wake construction.
     events: list[str] = []

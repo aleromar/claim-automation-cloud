@@ -21,7 +21,7 @@ from pipeline.gmail_client import (
     GmailNoAccessError,
 )
 from core.secret_store import GMAIL_REFRESH_TOKEN, GOOGLE_CLIENT_SECRET, FileSecretStore
-from pipeline.entry import run_pipeline
+from pipeline.entry import probe
 
 CLIENT_ID = "client-id-123"
 TOKEN_URL = "https://idp.test/token"
@@ -289,7 +289,7 @@ def test_get_subject_missing_payload_fails_loud(gmail):
 
 
 @respx.mock
-def test_run_pipeline_accepts_the_real_client(gmail):
+def test_probe_accepts_the_real_client(gmail):
     # Gate 3 M8: the only proof GmailClient satisfies the GmailReader protocol —
     # every other test uses hand-rolled fakes, so a method rename would ship
     # green and AttributeError on the first connected wake.
@@ -309,7 +309,7 @@ def test_run_pipeline_accepts_the_real_client(gmail):
     respx.get(f"{LIST_URL}/m2").mock(
         return_value=Response(200, json=_message("m2", [{"name": "Subject", "value": "spam"}]))
     )
-    assert run_pipeline(gmail) == 1  # run_pipeline mints via gmail.preflight()
+    assert probe(gmail) == 1  # probe mints via gmail.preflight()
 
 
 @respx.mock

@@ -1,9 +1,10 @@
 """Pipeline entry point — read-only Gmail probe (gmail-client REQ-3).
 
 Replaces the worker-skeleton stub: list the newest UNREAD page, count the
-claim-subject matches, touch nothing. Roadmap 5c swaps this body for the real
-processing pipeline; the reader-injection wiring stands. The GmailReader
-protocol keeps pipeline/ free of app imports (dependency inversion, same
+claim-subject matches, touch nothing. Roadmap 5c swaps the probe for the real
+processing pipeline; the wiring stands. The pipeline owns its I/O client
+(REQ-6, 2nd amendment 2026-08-21): run_pipeline builds and closes the
+GmailClient; the GmailReader protocol remains as the probe's test seam (same
 pattern as MembreteSource).
 """
 
@@ -11,7 +12,10 @@ import logging
 from time import monotonic
 from typing import Final, Protocol
 
+from core.config import get_settings
+from core.secret_store import get_store
 from pipeline.claim_data import CLAIM_SUBJECT_MARKERS
+from pipeline.gmail_client import GmailClient
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +36,17 @@ class GmailReader(Protocol):
     def get_subject(self, message_id: str) -> str: ...
 
 
-def run_pipeline(gmail: GmailReader) -> int:
+def run_pipeline() -> int:
+    """The zero-arg wake contract: a fresh GmailClient per run (P12 by
+    non-sharing), closed on every exit."""
+    gmail = GmailClient(get_settings(), get_store())
+    try:
+        return probe(gmail)
+    finally:
+        gmail.close()
+
+
+def probe(gmail: GmailReader) -> int:
     """One read-only probe run: count of claim-subject-matching UNREAD emails.
 
     The preflight is the body's first step (REQ-2 amendment, 2026-08-21): its
