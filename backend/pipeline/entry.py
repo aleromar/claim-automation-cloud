@@ -13,6 +13,7 @@ the relabel earlier.
 """
 
 import logging
+import re
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Final, Protocol, runtime_checkable
@@ -131,7 +132,11 @@ def process_mailbox(
             # Per-email boundary (REQ-2, deviation from the laptop's
             # batch-abort): terminal `failed` label = the operator work queue.
             logger.warning(
-                "%s email_failed id=%s reason=%s", _PIPELINE_LOG_PREFIX, message["id"], exc
+                "%s email_failed ref=%s id=%s reason=%s",
+                _PIPELINE_LOG_PREFIX,
+                _claim_ref_of(message),
+                message["id"],
+                exc,
             )
             gmail.modify_labels(message["id"], [failed_id], [UNREAD_LABEL_ID])
             failed += 1
@@ -150,6 +155,13 @@ def process_mailbox(
         failed_total,
     )
     return RunCounts(processed=processed, failed=failed, failed_total=failed_total)
+
+
+def _claim_ref_of(message: dict) -> str:
+    """Best-effort claim ref for the failure log (REQ-2) — the boundary can't
+    rely on a parsed ClaimData."""
+    match = re.search(r"\d{4}/\d+", ClaimData.extract_subject(message) or "")
+    return match.group(0) if match else "unparsed"
 
 
 def _process_one(

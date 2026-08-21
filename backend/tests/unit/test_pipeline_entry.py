@@ -441,3 +441,138 @@ def test_from_subject_source_uses_markers():
         assert not re.search(rf'"{re.escape(marker)}"', source), (
             f"literal {marker!r} re-inlined in from_subject; use CLAIM_SUBJECT_MARKERS"
         )
+
+
+# --- run_pipeline composition (REQ-3/7/12) — monkeypatched seams, no HTTP ---
+
+
+class SeamEvents:
+    log: list[str] = []
+
+
+class SeamClient:
+    """Stands in for both real clients at the composition seam."""
+
+    instances: list["SeamClient"] = []
+
+    def __init__(self, *args) -> None:
+        self.closed = False
+        SeamClient.instances.append(self)
+
+    def preflight(self) -> None:
+        SeamEvents.log.append(f"preflight:{type(self).__name__}")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class SeamGmail(SeamClient):
+    pass
+
+
+class SeamTrello(SeamClient):
+    pass
+
+
+class SeamStore:
+    def __init__(self, lease_free: bool = True) -> None:
+        self.lease_free = lease_free
+        self.lease_calls = 0
+        self.released = False
+
+    def try_acquire_run_lease(self, now) -> bool:
+        self.lease_calls += 1
+        return self.lease_free
+
+    def release_run_lease(self) -> None:
+        self.released = True
+
+    def read_trello_config(self):
+        return None  # SeamTrello ignores it
+
+
+@pytest.fixture
+def seams(monkeypatch):
+    SeamClient.instances = []
+    SeamEvents.log = []
+    store = SeamStore()
+    monkeypatch.setattr(pipeline.entry, "GmailClient", SeamGmail)
+    monkeypatch.setattr(pipeline.entry, "TrelloClient", SeamTrello)
+    monkeypatch.setattr(pipeline.entry, "get_state_store", lambda: store)
+    monkeypatch.setattr(pipeline.entry, "get_settings", lambda: object())
+    monkeypatch.setattr(pipeline.entry, "get_store", lambda: object())
+    monkeypatch.setattr(pipeline.entry, "_build_membrete_source", lambda settings: FakeMembretes())
+    monkeypatch.setattr(
+        pipeline.entry,
+        "process_mailbox",
+        lambda *a, **k: RunCounts(processed=0, failed=0, failed_total=0),
+    )
+    return store
+
+
+def test_run_pipeline_acquires_and_releases_the_lease(seams):
+    from pipeline.entry import run_pipeline
+
+    assert run_pipeline() == RunCounts(processed=0, failed=0, failed_total=0)
+    assert seams.lease_calls == 1
+    assert seams.released is True
+
+
+def test_run_pipeline_raises_busy_when_lease_held(seams):
+    from core.exceptions import RunBusyError
+    from pipeline.entry import run_pipeline
+
+    seams.lease_free = False
+    with pytest.raises(RunBusyError):
+        run_pipeline()
+    assert SeamClient.instances == []  # nothing composed, nothing touched
+
+
+def test_run_pipeline_preflights_gmail_then_trello_before_processing(seams, monkeypatch):
+    from pipeline.entry import run_pipeline
+
+    monkeypatch.setattr(
+        pipeline.entry,
+        "process_mailbox",
+        lambda *a, **k: (
+            SeamEvents.log.append("process"),
+            RunCounts(processed=0, failed=0, failed_total=0),
+        )[1],
+    )
+    run_pipeline()
+    assert SeamEvents.log == ["preflight:SeamGmail", "preflight:SeamTrello", "process"]
+
+
+def test_run_pipeline_closes_clients_and_releases_lease_on_failure(seams, monkeypatch):
+    from pipeline.entry import run_pipeline
+
+    def exploding_process(*args, **kwargs):
+        raise ConnectionError("mid-run failure")
+
+    monkeypatch.setattr(pipeline.entry, "process_mailbox", exploding_process)
+    with pytest.raises(ConnectionError):
+        run_pipeline()
+    assert all(client.closed for client in SeamClient.instances)
+    assert seams.released is True
+
+
+def test_membrete_source_requires_blob_endpoint_under_managed_identity():
+    # REQ-7 [REVISED]: composition-time enforcement fails the RUN, not the app.
+    from core.config import Settings
+    from pipeline.entry import _build_membrete_source
+
+    settings = Settings(
+        table_storage_backend="managed_identity",
+        tables_endpoint="https://tables.test",
+        blob_endpoint=None,
+    )
+    with pytest.raises(RuntimeError, match="blob_endpoint"):
+        _build_membrete_source(settings)
+
+
+def test_failure_log_carries_the_claim_ref_when_parseable(caplog):
+    # REQ-2: "claim ref if parsed, else message id" (Gate 2 drift fix).
+    with caplog.at_level(logging.WARNING, logger="pipeline.entry"):
+        _run([_msg("m1", COMUNICACION_SUBJECT, 100)])  # no card found -> failed
+    lines = [r.getMessage() for r in caplog.records if "email_failed" in r.getMessage()]
+    assert lines and "ref=2026/417" in lines[0]
