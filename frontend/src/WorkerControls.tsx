@@ -5,18 +5,21 @@ import { authFetch } from "./auth";
 
 // The closed outcome set (mirrors backend HeartbeatStatus): the exact-key table
 // makes a typo'd, stale, or missing label a compile error. The lookup stays
-// permissive on purpose — an unknown value (item 5 adds skipped_no_access)
-// renders raw; degrade readable, never crash (REQ-4.5).
-type RunOutcome = "ran" | "failed" | "skipped_disabled";
+// permissive on purpose — an unknown value renders raw; degrade readable,
+// never crash (REQ-4.5).
+type RunOutcome = "ran" | "failed" | "skipped_disabled" | "skipped_no_access";
 const OUTCOME_LABELS: Record<RunOutcome, string> = {
   ran: "ran",
   failed: "failed",
   skipped_disabled: "skipped (worker off)",
+  skipped_no_access: "skipped (Gmail needs reconnect)",
 };
 const outcomeLabel = (outcome: string) =>
   OUTCOME_LABELS[outcome as RunOutcome] ?? outcome;
 
-type HeartbeatView = { at: string; status: string };
+// matched: the probe's claim-email count (gmail-client REQ-5) — optional so
+// older backends and pre-5b heartbeat rows keep rendering.
+type HeartbeatView = { at: string; status: string; matched?: number | null };
 // Discriminated union per the structure.md data-fetching pattern: per-state
 // data exists only in its state; render a distinct view for each.
 type Panel =
@@ -34,7 +37,10 @@ function isHeartbeat(value: unknown): value is HeartbeatView {
     typeof heartbeat === "object" &&
     heartbeat !== null &&
     typeof heartbeat.at === "string" &&
-    typeof heartbeat.status === "string"
+    typeof heartbeat.status === "string" &&
+    // Deliberately optional (gate E8): requiring it would flip the card to
+    // the error state for pre-5b rows and older backends.
+    (heartbeat.matched == null || typeof heartbeat.matched === "number")
   );
 }
 
@@ -171,7 +177,12 @@ export default function WorkerControls() {
         {panel.heartbeat
           ? `${new Date(panel.heartbeat.at).toLocaleString()} — ${outcomeLabel(
               panel.heartbeat.status,
-            )}`
+            )}${
+              // != null, never truthiness: 0 is a successful probe (REQ-5).
+              panel.heartbeat.matched != null
+                ? ` — ${panel.heartbeat.matched} matching emails`
+                : ""
+            }`
           : "never"}
       </p>
       <p>

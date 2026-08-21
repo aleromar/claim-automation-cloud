@@ -20,6 +20,23 @@ def test_heartbeat_accepts_aware_utc():
     assert hb.at.tzinfo is not None
 
 
+def test_heartbeat_status_has_skipped_no_access():
+    # gmail-client REQ-4: the preflight outcome, snake_case like its siblings
+    # (the worker-controls frontend comment anticipated this exact spelling).
+    assert HeartbeatStatus.SKIPPED_NO_ACCESS.value == "skipped_no_access"
+
+
+def test_heartbeat_matched_defaults_to_none():
+    # gmail-client REQ-4: rows predating 5b (and non-ran outcomes) carry no count.
+    hb = Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.SKIPPED_DISABLED)
+    assert hb.matched is None
+
+
+def test_heartbeat_carries_matched_count():
+    hb = Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN, matched=3)
+    assert hb.matched == 3
+
+
 def test_trello_config_holds_board_and_list_ids():
     # settings REQ-1/2: the TrelloConfig row carries the two runtime-entered IDs (D23).
     cfg = TrelloConfig(board_id="g7vysmjD", list_id="68875e0d401d7613fcbbc092")

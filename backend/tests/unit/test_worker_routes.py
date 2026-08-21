@@ -59,6 +59,18 @@ def test_status_returns_enabled_and_heartbeat(client, auth, fake_store):
     assert datetime.fromisoformat(body["heartbeat"]["at"]) == at
 
 
+def test_status_heartbeat_carries_matched_count(client, auth, fake_store):
+    # gmail-client REQ-4 / Gate 2 finding 3: the probe count must reach the
+    # dashboard through the status response body, not just the stored model.
+    fake_store.heartbeat = Heartbeat(
+        at=datetime(2026, 8, 21, 12, 30, 0, tzinfo=UTC),
+        status=HeartbeatStatus.RAN,
+        matched=3,
+    )
+    body = client.get(STATUS_PATH, headers=auth).json()
+    assert body["heartbeat"]["matched"] == 3
+
+
 def test_status_heartbeat_null_when_no_run_yet(client, auth):
     resp = client.get(STATUS_PATH, headers=auth)
     assert resp.status_code == 200
@@ -94,11 +106,36 @@ def test_set_enabled_rejects_non_bool(client, auth, fake_store, body):
 # --- process-now (REQ-3) ---
 
 
+@pytest.fixture(autouse=True)
+def fake_gmail(monkeypatch):
+    """Process-now composes the full wake path, which since gmail-client builds
+    a GmailClient and preflights — fake the seam so these route tests keep
+    testing routing, not Gmail."""
+
+    class HealthyFakeGmail:
+        def __init__(self, settings, secret_store) -> None:
+            pass
+
+        def preflight(self) -> None:
+            pass
+
+        def list_unread_message_ids(self) -> list[str]:  # pragma: no cover
+            return []
+
+        def get_subject(self, message_id: str) -> str:  # pragma: no cover
+            return ""
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("app.worker.GmailClient", HealthyFakeGmail)
+
+
 def test_run_now_disabled_returns_skipped_and_writes_heartbeat(
     client, auth, fake_store, monkeypatch
 ):
     pipeline_calls: list[str] = []
-    monkeypatch.setattr("app.worker.run_pipeline", lambda: pipeline_calls.append("called"))
+    monkeypatch.setattr("app.worker.run_pipeline", lambda gmail: pipeline_calls.append("called"))
     resp = client.post(RUN_PATH, headers=auth)
     assert resp.status_code == 200
     assert resp.json() == {"outcome": HeartbeatStatus.SKIPPED_DISABLED.value}
@@ -109,7 +146,7 @@ def test_run_now_disabled_returns_skipped_and_writes_heartbeat(
 
 def test_run_now_enabled_returns_ran_and_writes_heartbeat(client, auth, fake_store, monkeypatch):
     pipeline_calls: list[str] = []
-    monkeypatch.setattr("app.worker.run_pipeline", lambda: pipeline_calls.append("called"))
+    monkeypatch.setattr("app.worker.run_pipeline", lambda gmail: pipeline_calls.append("called"))
     fake_store.enabled = True
     resp = client.post(RUN_PATH, headers=auth)
     assert resp.status_code == 200
@@ -122,7 +159,7 @@ def test_run_now_enabled_returns_ran_and_writes_heartbeat(client, auth, fake_sto
 def test_run_now_pipeline_failure_writes_failed_heartbeat_and_500s(
     secrets, auth, fake_store, monkeypatch
 ):
-    def failing_pipeline() -> None:
+    def failing_pipeline(gmail) -> None:
         raise RuntimeError("pipeline blew up")
 
     monkeypatch.setattr("app.worker.run_pipeline", failing_pipeline)

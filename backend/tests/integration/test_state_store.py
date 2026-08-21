@@ -155,3 +155,56 @@ def test_heartbeat_write_read_roundtrip(store):
     assert got.status == HeartbeatStatus.RAN
     assert got.at == at
     assert got.at.tzinfo is not None
+
+
+def test_heartbeat_matched_roundtrip(store):
+    # gmail-client REQ-4: the probe count survives the real Table service.
+    written = Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN, matched=3)
+    store.write_heartbeat(written)
+    got = store.read_heartbeat()
+    assert got is not None
+    assert got.matched == 3
+
+
+def test_heartbeat_row_without_matched_reads_none(service, prefix, store):
+    # gmail-client REQ-4: rows written before 5b lack the property entirely —
+    # they must read as matched=None, no migration.
+    from app.state_store import (
+        HEARTBEAT_AT_PROP,
+        HEARTBEAT_PARTITION,
+        HEARTBEAT_ROW,
+        HEARTBEAT_STATUS_PROP,
+        HEARTBEAT_TABLE,
+    )
+
+    service.get_table_client(prefix + HEARTBEAT_TABLE).upsert_entity(
+        {
+            "PartitionKey": HEARTBEAT_PARTITION,
+            "RowKey": HEARTBEAT_ROW,
+            HEARTBEAT_AT_PROP: datetime.now(UTC),
+            HEARTBEAT_STATUS_PROP: HeartbeatStatus.RAN.value,
+        }
+    )
+    got = store.read_heartbeat()
+    assert got is not None
+    assert got.matched is None
+
+
+def test_heartbeat_skipped_no_access_roundtrip(store):
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.SKIPPED_NO_ACCESS))
+    got = store.read_heartbeat()
+    assert got is not None
+    assert got.status == HeartbeatStatus.SKIPPED_NO_ACCESS
+    assert got.matched is None
+
+
+def test_heartbeat_replace_clears_stale_matched(store):
+    # gmail-client gate E8: REPLACE mode must drop a previous run's matched
+    # property when the next outcome carries none — a MERGE would leave a stale
+    # count attached to a skip/fail heartbeat.
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN, matched=7))
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.FAILED))
+    got = store.read_heartbeat()
+    assert got is not None
+    assert got.status == HeartbeatStatus.FAILED
+    assert got.matched is None

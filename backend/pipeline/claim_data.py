@@ -9,12 +9,20 @@ import base64
 import html
 import re
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from pipeline.extraction import FieldExtractor
+
+# The three subject substrings that make an email claim-bearing. Single source
+# for from_subject AND the 5b probe's matching criterion (gmail-client C6) —
+# hoisting them is behavior-identical, guarded by the ported parity tests.
+DECLARACION_MARKER: Final = "Declaración de siniestro a colaborador"
+ASISTENCIA_MARKER: Final = "Solicitud de asistencia a colaborador"
+COMUNICACION_MARKER: Final = "Comunicación a colaborador"
+CLAIM_SUBJECT_MARKERS: Final = (DECLARACION_MARKER, ASISTENCIA_MARKER, COMUNICACION_MARKER)
 
 
 class ClaimType(Enum):
@@ -31,11 +39,11 @@ class ClaimType(Enum):
     def from_subject(cls, subject: str | None, body: str | None) -> "ClaimType | None":
         if not subject:
             return None
-        if "Declaración de siniestro a colaborador" in subject:
+        if DECLARACION_MARKER in subject:
             if "urgente" in subject.lower():
                 return cls.DECLARACION_URGENTE
             return cls.DECLARACION_SINIESTRO
-        elif "Solicitud de asistencia a colaborador" in subject:
+        elif ASISTENCIA_MARKER in subject:
             if body and "SERVICIO BRICO HOGAR".lower() in body.lower():
                 return cls.SOLICITUD_ASISTENCIA_BRICO
             elif body and "ENVÍO DE PROFESIONALES".lower() in body.lower():
@@ -44,7 +52,7 @@ class ClaimType(Enum):
                 return cls.SOLICITUD_ASISTENCIA_ELECTRICIDAD_EMERGENCIA
             else:
                 raise ValueError("Invalid claim type in subject or body")
-        elif "Comunicación a colaborador" in subject:
+        elif COMUNICACION_MARKER in subject:
             return cls.COMUNICACION_A_COLABORADOR
         return None
 
