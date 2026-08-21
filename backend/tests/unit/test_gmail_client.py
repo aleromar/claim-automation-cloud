@@ -5,6 +5,7 @@ respx mocks the wire (house pattern, cf. test_auth_routes.py); no Google SDK.
 """
 
 import logging
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -13,11 +14,14 @@ from httpx import Response
 
 from app.config import Settings
 from app.gmail_client import (
+    MISSING_TOKEN,
     PROBE_MAX_RESULTS,
+    TOKEN_REJECTED,
     GmailClient,
     GmailNoAccessError,
 )
 from app.secret_store import GMAIL_REFRESH_TOKEN, GOOGLE_CLIENT_SECRET, FileSecretStore
+from pipeline.entry import run_pipeline
 
 CLIENT_ID = "client-id-123"
 TOKEN_URL = "https://idp.test/token"
@@ -73,7 +77,7 @@ def test_preflight_posts_refresh_grant(gmail):
     route = _mint_ok()
     gmail.preflight()
     assert route.called
-    body = dict(pair.split("=") for pair in route.calls.last.request.content.decode().split("&"))
+    body = {k: v[0] for k, v in parse_qs(route.calls.last.request.content.decode()).items()}
     assert body["grant_type"] == "refresh_token"
     assert body["refresh_token"] == REFRESH_TOKEN
     assert body["client_id"] == CLIENT_ID
@@ -89,21 +93,40 @@ def test_preflight_missing_refresh_token_raises_without_http(settings, tmp_path)
     # pass-through error, so reaching GmailNoAccessError proves no call happened.
     with pytest.raises(GmailNoAccessError) as exc_info:
         client.preflight()
-    assert exc_info.value.reason == "missing_token"
+    assert exc_info.value.reason == MISSING_TOKEN
+
+
+@respx.mock
+def test_preflight_missing_client_secret_is_a_deploy_fault_not_no_access(settings, tmp_path):
+    # Gate 3 H1: an absent google-client-secret would reach Google as
+    # client_secret="" -> 401 invalid_client -> a FALSE "reconnect Gmail"
+    # dead-end (reconnecting cannot mint a secret). It must fail loudly as a
+    # deployment fault instead — require_secret, same stance as auth_routes.
+    secrets = FileSecretStore(tmp_path / "secrets.json")
+    secrets.set(GMAIL_REFRESH_TOKEN, REFRESH_TOKEN)  # secret deliberately absent
+    client = GmailClient(settings, secrets)
+    with pytest.raises(RuntimeError, match="google-client-secret"):
+        client.preflight()  # no respx route: proves no HTTP happened
 
 
 @pytest.mark.parametrize(
     ("status", "error_code"),
-    [(400, "invalid_grant"), (401, "invalid_client"), (401, "deleted_client")],
+    [
+        (400, "invalid_grant"),
+        (401, "invalid_client"),
+        (401, "deleted_client"),
+        (401, "unauthorized_client"),
+    ],
 )
 @respx.mock
 def test_preflight_definitive_rejection_raises_no_access(gmail, status, error_code):
     # invalid_grant: revoked / 6-months-unused / password change (documented).
-    # invalid_client verified live at the P10 gate; deleted_client per gate E2.
+    # invalid_client verified live at the P10 gate; deleted_client per gate E2;
+    # unauthorized_client per Gate 3 H3 (client lost the grant — non-transient).
     _mock_token({"error": error_code}, status=status)
     with pytest.raises(GmailNoAccessError) as exc_info:
         gmail.preflight()
-    assert exc_info.value.reason == "token_rejected"
+    assert exc_info.value.reason == TOKEN_REJECTED
 
 
 @respx.mock
@@ -116,8 +139,19 @@ def test_preflight_server_error_propagates(gmail):
 
 
 @respx.mock
-def test_preflight_unknown_4xx_error_code_propagates(gmail):
+def test_preflight_unknown_4xx_error_code_propagates_and_is_logged(gmail, caplog):
     _mock_token({"error": "temporarily_unavailable"}, status=400)
+    with caplog.at_level(logging.WARNING), pytest.raises(httpx.HTTPStatusError):
+        gmail.preflight()
+    # Gate 3 H3: App Insights needs the OAuth error code, not just status+URL.
+    assert any("temporarily_unavailable" in r.getMessage() for r in caplog.records)
+
+
+@respx.mock
+def test_preflight_non_dict_json_error_body_propagates_status_error(gmail):
+    # Gate 3 M6: a valid-JSON-but-not-dict 400 body must surface as the HTTP
+    # error, not an AttributeError from the error-code probe.
+    _mock_token(["weird"], status=400)
     with pytest.raises(httpx.HTTPStatusError):
         gmail.preflight()
 
@@ -164,6 +198,17 @@ def test_constructor_does_no_secret_access_and_no_http(settings):
             raise AssertionError("never written")
 
     GmailClient(settings, ExplodingSecretStore())  # must not raise
+
+
+def test_constructor_builds_no_http_client(settings, secrets, monkeypatch):
+    # Gate 3 M7: httpx.Client() eagerly builds an SSLContext (measured ~100 ms
+    # cold) — every disabled wake would pay it. Construction must be lazy.
+    def exploding_client(*args, **kwargs):
+        raise AssertionError("constructor must not build the httpx client")
+
+    monkeypatch.setattr("app.gmail_client.httpx.Client", exploding_client)
+    client = GmailClient(settings, secrets)
+    client.close()  # close on a never-used client must be safe too
 
 
 # --- REQ-3: list + subject fetch ---
@@ -229,6 +274,43 @@ def test_get_subject_missing_header_returns_empty(gmail):
     )
     gmail.preflight()
     assert gmail.get_subject("m1") == ""
+
+
+@respx.mock
+def test_get_subject_missing_payload_fails_loud(gmail):
+    # Gate 3 H2: format=metadata documents payload.headers — a response without
+    # them is shape drift and must raise (-> failed heartbeat), never count as
+    # a silent no-match.
+    _mint_ok()
+    respx.get(f"{LIST_URL}/m1").mock(return_value=Response(200, json={"id": "m1"}))
+    gmail.preflight()
+    with pytest.raises(KeyError):
+        gmail.get_subject("m1")
+
+
+@respx.mock
+def test_run_pipeline_accepts_the_real_client(gmail):
+    # Gate 3 M8: the only proof GmailClient satisfies the GmailReader protocol —
+    # every other test uses hand-rolled fakes, so a method rename would ship
+    # green and AttributeError on the first connected wake.
+    _mint_ok()
+    respx.get(LIST_URL).mock(
+        return_value=Response(200, json={"messages": [{"id": "m1"}, {"id": "m2"}]})
+    )
+    respx.get(f"{LIST_URL}/m1").mock(
+        return_value=Response(
+            200,
+            json=_message(
+                "m1",
+                [{"name": "Subject", "value": "Declaración de siniestro a colaborador 2026/9"}],
+            ),
+        )
+    )
+    respx.get(f"{LIST_URL}/m2").mock(
+        return_value=Response(200, json=_message("m2", [{"name": "Subject", "value": "spam"}]))
+    )
+    gmail.preflight()
+    assert run_pipeline(gmail) == 1
 
 
 @respx.mock

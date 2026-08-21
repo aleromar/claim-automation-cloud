@@ -210,11 +210,10 @@ def test_timer_wake_disabled_writes_skipped_heartbeat(functions_host, store, cle
 def test_timer_wake_enabled_without_gmail_creds_writes_skipped_no_access(
     functions_host, store, clean_worker_state
 ):
-    # REVISED for gmail-client (was: expects RAN against the stub pipeline).
     # The host env deliberately seeds no gmail-refresh-token, so an enabled
     # wake must exit at the token preflight — this is the preflight's
-    # host-level proof (spec REQ-2); the RAN path's live proof is the first
-    # connected wake after deploy (gate E4, operator-accepted residual).
+    # host-level proof (gmail-client REQ-2); the RAN path's live proof is the
+    # first connected wake after deploy (gate E4, operator-accepted residual).
     store.set_enabled(True)
     invoke_time = _invoke_worker(functions_host)
     heartbeat = _wait_for_heartbeat(store, after=invoke_time)

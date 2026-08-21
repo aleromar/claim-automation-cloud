@@ -23,7 +23,7 @@ from azure.data.tables import (
     UpdateMode,
 )
 from azure.identity import DefaultAzureCredential
-from pydantic import AwareDatetime, BaseModel
+from pydantic import AwareDatetime, BaseModel, Field
 
 from app.config import Settings, get_settings
 
@@ -77,7 +77,7 @@ class Heartbeat(BaseModel):
     status: HeartbeatStatus
     # Probe count for `ran` outcomes (gmail-client REQ-4); None otherwise and on
     # rows written before 5b — Table Storage has no null, so None is "property absent".
-    matched: int | None = None
+    matched: int | None = Field(default=None, ge=0)
 
 
 class TrelloConfig(BaseModel):

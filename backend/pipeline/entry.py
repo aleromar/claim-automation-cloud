@@ -31,15 +31,21 @@ class GmailReader(Protocol):
 
 
 def run_pipeline(gmail: GmailReader) -> int:
-    """One read-only probe run: count of claim-subject-matching UNREAD emails."""
+    """One read-only probe run: count of claim-subject-matching UNREAD emails.
+
+    The count is an upper bound on processable claims: a marker match doesn't
+    guarantee the `YYYY/N` claim number or (for asistencia) a recognized
+    service in the body — 5c's processing owns those failures.
+    """
     deadline = monotonic() + PROBE_DEADLINE_S
     message_ids = gmail.list_unread_message_ids()
     matched = 0
-    for message_id in message_ids:
+    for position, message_id in enumerate(message_ids, start=1):
         if monotonic() > deadline:
+            # The sole degraded-Gmail breadcrumb: report actual progress.
             raise TimeoutError(
                 f"probe exceeded its {int(PROBE_DEADLINE_S)} s deadline "
-                f"after {len(message_ids)} listed messages"
+                f"at message {position} of {len(message_ids)}"
             )
         subject = gmail.get_subject(message_id)
         if any(marker in subject for marker in CLAIM_SUBJECT_MARKERS):

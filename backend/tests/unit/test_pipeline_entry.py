@@ -71,14 +71,25 @@ def test_probe_reader_errors_propagate():
         run_pipeline(RaisingReader())
 
 
-def test_probe_deadline_exceeded_raises(monkeypatch):
+def test_probe_deadline_exceeded_raises_with_progress(monkeypatch):
     # Gate E1: a degraded Gmail (each fetch slow) must fail the run inside the
-    # Functions 5-min budget so the `failed` heartbeat still lands.
+    # Functions 5-min budget so the `failed` heartbeat still lands. The message
+    # is the sole degraded-Gmail breadcrumb, so it reports actual progress
+    # (Gate 3 M5), not the listed total.
     clock = iter(range(0, 10_000, 100))  # each tick jumps 100 s
     monkeypatch.setattr(pipeline.entry, "monotonic", lambda: next(clock))
     reader = FakeReader({f"m{i}": NOISE_SUBJECT for i in range(5)})
-    with pytest.raises(TimeoutError, match=str(int(PROBE_DEADLINE_S))):
+    with pytest.raises(TimeoutError, match=rf"{int(PROBE_DEADLINE_S)}.*message 2 of 5"):
         run_pipeline(reader)
+
+
+def test_probe_log_prefix_matches_the_worker_prefix():
+    # The probe's count line must stay findable by the same App Insights query
+    # as the worker's outcome line (the prefix is duplicated because pipeline/
+    # must not import app — this test IS the drift guard).
+    from app.worker import WORKER_RUN_LOG_PREFIX
+
+    assert pipeline.entry._PROBE_LOG_PREFIX.startswith(WORKER_RUN_LOG_PREFIX)
 
 
 def test_markers_are_the_three_classification_literals():

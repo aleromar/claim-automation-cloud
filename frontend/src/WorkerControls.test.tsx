@@ -94,6 +94,42 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     expect(lastRun).toHaveTextContent(/ran — 3 matching emails/i);
   });
 
+  it("renders a singular label for exactly one matched email", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T10:30:00+00:00",
+        status: "ran",
+        matched: 1,
+      }),
+    });
+    render(<WorkerControls />);
+    const lastRun = await screen.findByText(/last run:/i);
+    expect(lastRun).toHaveTextContent(/ran — 1 matching email(?!s)/i);
+  });
+
+  it("treats a non-numeric matched as a broken contract (error state)", async () => {
+    mockWorkerApi({
+      status: () =>
+        new Response(
+          JSON.stringify({
+            enabled: true,
+            heartbeat: {
+              at: "2026-08-21T10:30:00+00:00",
+              status: "ran",
+              matched: "3",
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+    render(<WorkerControls />);
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /worker status unavailable/i,
+      ),
+    );
+  });
+
   it("renders a zero matched count (0 is a successful probe, not absence)", async () => {
     mockWorkerApi({
       status: statusResponse(true, {

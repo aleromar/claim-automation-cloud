@@ -20,6 +20,16 @@ const outcomeLabel = (outcome: string) =>
 // matched: the probe's claim-email count (gmail-client REQ-5) — optional so
 // older backends and pre-5b heartbeat rows keep rendering.
 type HeartbeatView = { at: string; status: string; matched?: number | null };
+
+const lastRunText = (heartbeat: HeartbeatView) => {
+  const base = `${new Date(heartbeat.at).toLocaleString()} — ${outcomeLabel(
+    heartbeat.status,
+  )}`;
+  // != null, never truthiness: 0 is a successful probe (REQ-5).
+  if (heartbeat.matched == null) return base;
+  const noun = heartbeat.matched === 1 ? "email" : "emails";
+  return `${base} — ${heartbeat.matched} matching ${noun}`;
+};
 // Discriminated union per the structure.md data-fetching pattern: per-state
 // data exists only in its state; render a distinct view for each.
 type Panel =
@@ -173,17 +183,7 @@ export default function WorkerControls() {
         Worker enabled
       </label>
       <p>
-        Last run:{" "}
-        {panel.heartbeat
-          ? `${new Date(panel.heartbeat.at).toLocaleString()} — ${outcomeLabel(
-              panel.heartbeat.status,
-            )}${
-              // != null, never truthiness: 0 is a successful probe (REQ-5).
-              panel.heartbeat.matched != null
-                ? ` — ${panel.heartbeat.matched} matching emails`
-                : ""
-            }`
-          : "never"}
+        Last run: {panel.heartbeat ? lastRunText(panel.heartbeat) : "never"}
       </p>
       <p>
         <button onClick={processNow} disabled={busy} aria-busy={busy}>

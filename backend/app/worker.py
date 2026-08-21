@@ -32,7 +32,7 @@ WORKER_RUN_LOG_PREFIX = "worker_run"  # App Insights: traces | where message sta
 
 def run_worker(
     store: StateStore,
-    pipeline: Callable[[], int | None],
+    pipeline: Callable[[], int],
     preflight: Callable[[], None],
 ) -> HeartbeatStatus:
     """Execute one wake. Storage faults propagate — the host records a failed
@@ -71,9 +71,10 @@ def run_wake(store: StateStore) -> HeartbeatStatus:
     """The single composition point of wake + preflight + probe (PR #15 review
     M2; gmail-client REQ-6): the timer and the process-now endpoint both call
     this. A fresh GmailClient per wake — nothing Gmail-side is shared across
-    threads (P12 by non-sharing); construction is I/O-free (gate E3), so
-    building it ahead of the enabled gate costs nothing. 5c swaps
-    run_pipeline's *body* in pipeline/entry.py; this wiring stands."""
+    threads (P12 by non-sharing); the client does no secret reads and builds
+    its HTTP client lazily (gates E3/M7), so constructing it ahead of the
+    enabled gate costs nothing. 5c swaps run_pipeline's *body* in
+    pipeline/entry.py; this wiring stands."""
     gmail = GmailClient(get_settings(), get_store())
     try:
         return run_worker(store, lambda: run_pipeline(gmail), gmail.preflight)
