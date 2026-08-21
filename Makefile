@@ -57,7 +57,7 @@ dev: env-check azurite
 # the backend fails fast without both. Replace the placeholder for real logins.
 seed-dev:
 	cd backend && uv run python -c "import secrets; \
-	from app.secret_store import GOOGLE_CLIENT_SECRET, SESSION_SIGNING_KEY, FileSecretStore; \
+	from core.secret_store import GOOGLE_CLIENT_SECRET, SESSION_SIGNING_KEY, FileSecretStore; \
 	s = FileSecretStore('.secrets.json'); \
 	s.get(SESSION_SIGNING_KEY) or s.set(SESSION_SIGNING_KEY, secrets.token_urlsafe(48)); \
 	s.get(GOOGLE_CLIENT_SECRET) or s.set(GOOGLE_CLIENT_SECRET, 'dev-placeholder-not-a-real-secret'); \
