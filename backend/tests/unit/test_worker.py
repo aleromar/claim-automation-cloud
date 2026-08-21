@@ -14,9 +14,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from pipeline.gmail_client import GmailNoAccessError
 from app.state_store import Heartbeat, HeartbeatStatus
 from app.worker import WORKER_RUN_LOG_PREFIX, run_scheduled_worker, run_worker
+from core.exceptions import NoAccessError
+from pipeline.gmail_client import GmailNoAccessError
 
 
 class FakeStateStore:
@@ -117,6 +118,24 @@ def test_no_access_preflight_writes_skipped_no_access_and_skips_pipeline(caplog)
     # Structured skip reason precedes the outcome line (gmail-client REQ-2).
     lines = [r.getMessage() for r in caplog.records if r.name == "app.worker"]
     assert f"{WORKER_RUN_LOG_PREFIX} gmail_no_access reason=missing_token" in lines
+
+
+def test_scheduler_classifies_the_neutral_contract_exception():
+    # The wake contract is workload-agnostic: run_worker catches core's
+    # NoAccessError, never a Gmail-specific type — any workload's preflight
+    # (5c: Trello) signals dead credentials the same way. GmailNoAccessError
+    # participates by subclassing.
+    store = FakeStateStore(enabled=True, events=[])
+
+    class OtherWorkloadNoAccess(NoAccessError):
+        pass
+
+    def other_preflight() -> None:
+        raise OtherWorkloadNoAccess("credentials_revoked")
+
+    outcome = run_worker(store, lambda: 0, other_preflight)
+    assert outcome == HeartbeatStatus.SKIPPED_NO_ACCESS
+    assert issubclass(GmailNoAccessError, NoAccessError)
 
 
 def test_transient_preflight_error_writes_failed_and_raises():

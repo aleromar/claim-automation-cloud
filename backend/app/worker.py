@@ -18,7 +18,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from core.config import get_settings
-from pipeline.gmail_client import GmailClient, GmailNoAccessError
+from core.exceptions import NoAccessError
+from pipeline.gmail_client import GmailClient
 from core.secret_store import get_store
 from app.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
 from pipeline.entry import run_pipeline
@@ -36,14 +37,14 @@ def run_worker(
     preflight: Callable[[], None],
 ) -> HeartbeatStatus:
     """Execute one wake. Storage faults propagate — the host records a failed
-    invocation (no swallow-and-continue). GmailNoAccessError is classified as
+    invocation (no swallow-and-continue). NoAccessError (the core wake contract) is classified as
     a skip ONLY when raised by the preflight call itself (gate E5)."""
     if not store.read_enabled():
         _report(store, HeartbeatStatus.SKIPPED_DISABLED)
         return HeartbeatStatus.SKIPPED_DISABLED
     try:
         preflight()
-    except GmailNoAccessError as exc:
+    except NoAccessError as exc:
         logger.warning("%s gmail_no_access reason=%s", WORKER_RUN_LOG_PREFIX, exc.reason)
         _report(store, HeartbeatStatus.SKIPPED_NO_ACCESS)
         return HeartbeatStatus.SKIPPED_NO_ACCESS

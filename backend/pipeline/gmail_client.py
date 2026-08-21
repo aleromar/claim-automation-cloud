@@ -18,6 +18,7 @@ from typing import Final, Literal
 import httpx
 
 from core.config import Settings
+from core.exceptions import NoAccessError
 from core.secret_store import (
     GMAIL_REFRESH_TOKEN,
     GOOGLE_CLIENT_SECRET,
@@ -49,13 +50,13 @@ TOKEN_REJECTED: Final = "token_rejected"
 NoAccessReason = Literal["missing_token", "token_rejected"]
 
 
-class GmailNoAccessError(Exception):
-    """Definitive credential failure. The wake classifies it as
-    `skipped_no_access` only when the *preflight* raises it (gate E5)."""
+class GmailNoAccessError(NoAccessError):
+    """Definitive credential failure — the Gmail arm of core's NoAccessError
+    wake contract. The scheduler classifies the base type as `skipped_no_access`,
+    and only when the *preflight* raises it (gate E5)."""
 
     def __init__(self, reason: NoAccessReason) -> None:
-        super().__init__(f"gmail access unavailable: {reason}")
-        self.reason = reason
+        super().__init__(reason, f"gmail access unavailable: {reason}")
 
 
 class GmailClient:
