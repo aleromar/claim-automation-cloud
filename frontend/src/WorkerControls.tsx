@@ -7,25 +7,47 @@ import { authFetch } from "./auth";
 // makes a typo'd, stale, or missing label a compile error. The lookup stays
 // permissive on purpose — an unknown value renders raw; degrade readable,
 // never crash (REQ-4.5).
-type RunOutcome = "ran" | "failed" | "skipped_disabled" | "skipped_no_access";
+type RunOutcome =
+  "ran" | "failed" | "skipped_disabled" | "skipped_no_access" | "skipped_busy";
 const OUTCOME_LABELS: Record<RunOutcome, string> = {
   ran: "ran",
   failed: "failed",
   skipped_disabled: "skipped (worker off)",
   skipped_no_access: "skipped (Gmail needs reconnect)",
+  skipped_busy: "skipped (another run in progress)",
 };
 const outcomeLabel = (outcome: string) =>
   OUTCOME_LABELS[outcome as RunOutcome] ?? outcome;
 
-// matched: the probe's claim-email count (gmail-client REQ-5) — optional so
-// older backends and pre-5b heartbeat rows keep rendering.
-type HeartbeatView = { at: string; status: string; matched?: number | null };
+// processed/failed/failed_total: 5c run counts + failed-label gauge
+// (pipeline-wiring REQ-10); matched: the 5b probe's legacy count. All optional
+// so older backends and pre-5c heartbeat rows keep rendering.
+type HeartbeatView = {
+  at: string;
+  status: string;
+  matched?: number | null;
+  processed?: number | null;
+  failed?: number | null;
+  failed_total?: number | null;
+};
+
+// The backend caps the gauge at one page (REQ-5): 101 means "more than 100".
+const GAUGE_CAP = 100;
 
 const lastRunText = (heartbeat: HeartbeatView) => {
   const base = `${new Date(heartbeat.at).toLocaleString()} — ${outcomeLabel(
     heartbeat.status,
   )}`;
-  // != null, never truthiness: 0 is a successful probe (REQ-5).
+  // != null, never truthiness: 0 is a successful, informative run (REQ-10).
+  if (heartbeat.processed != null && heartbeat.failed != null) {
+    const counts = `${base} — ${heartbeat.processed} processed, ${heartbeat.failed} failed`;
+    if (heartbeat.failed_total == null) return counts;
+    const gauge =
+      heartbeat.failed_total > GAUGE_CAP
+        ? `${GAUGE_CAP}+`
+        : `${heartbeat.failed_total}`;
+    return `${counts} · ${gauge} in failed state`;
+  }
   if (heartbeat.matched == null) return base;
   const noun = heartbeat.matched === 1 ? "email" : "emails";
   return `${base} — ${heartbeat.matched} matching ${noun}`;
@@ -48,9 +70,13 @@ function isHeartbeat(value: unknown): value is HeartbeatView {
     heartbeat !== null &&
     typeof heartbeat.at === "string" &&
     typeof heartbeat.status === "string" &&
-    // Deliberately optional (gate E8): requiring it would flip the card to
-    // the error state for pre-5b rows and older backends.
-    (heartbeat.matched == null || typeof heartbeat.matched === "number")
+    // Deliberately optional (gate E8): requiring any count would flip the
+    // card to the error state for older rows and backends.
+    (heartbeat.matched == null || typeof heartbeat.matched === "number") &&
+    (heartbeat.processed == null || typeof heartbeat.processed === "number") &&
+    (heartbeat.failed == null || typeof heartbeat.failed === "number") &&
+    (heartbeat.failed_total == null ||
+      typeof heartbeat.failed_total === "number")
   );
 }
 
