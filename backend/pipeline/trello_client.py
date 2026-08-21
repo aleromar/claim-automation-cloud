@@ -8,6 +8,7 @@ no I/O and the httpx client is built lazily (same E3/M7 stance as GmailClient).
 """
 
 import logging
+import re
 from time import sleep
 from typing import Final, Literal
 
@@ -99,6 +100,7 @@ class TrelloClient:
             )
         ).json()
         try:
+            short_url = card["shortUrl"]  # inside the unit: a shape drift compensates too
             self._checked(
                 self._request(
                     "POST",
@@ -119,7 +121,7 @@ class TrelloClient:
                 # failure must surface, not the delete's.
                 logger.warning("compensating delete failed for card %s", card["id"])
             raise
-        return card["shortUrl"]
+        return short_url
 
     def add_comment(self, card_id: str, text: str) -> None:
         self._checked(
@@ -128,20 +130,24 @@ class TrelloClient:
 
     def find_card_by_claim_ref(self, claim_ref: str) -> dict | None:
         """Every list on the board, then the archive (laptop parity,
-        main.py:172-186) — substring match on the card name."""
+        main.py:172-186). Boundary match, not bare substring (Gate 3 M4,
+        recorded deviation): the laptop's `"2026/41" in name` would put a
+        comunicación comment on card 2026/417 — the ref must not be followed
+        by another digit."""
         assert self._config is not None
+        pattern = re.compile(rf"{re.escape(claim_ref)}(?!\d)")
         board = self._config.board_id
         lists = self._checked(self._request("GET", f"/1/boards/{board}/lists")).json()
         for board_list in lists:
             cards = self._checked(self._request("GET", f"/1/lists/{board_list['id']}/cards")).json()
             for card in cards:
-                if claim_ref in card.get("name", ""):
+                if pattern.search(card.get("name", "")):
                     return card
         archived = self._checked(
             self._request("GET", f"/1/boards/{board}/cards", params={"filter": "closed"})
         ).json()
         for card in archived:
-            if claim_ref in card.get("name", ""):
+            if pattern.search(card.get("name", "")):
                 return card
         return None
 

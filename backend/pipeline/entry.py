@@ -107,11 +107,21 @@ def process_mailbox(
     procesado_id = gmail.get_or_create_label_id(LABEL_PROCESADO)
     failed_id = gmail.get_or_create_label_id(LABEL_FAILED)
     message_ids = gmail.list_unread_message_ids(query=build_claim_query())
+    # The fetch phase honors the deadline too (Gate 3 M5): 100 slow fetches
+    # must not eat the functionTimeout — unfetched messages stay UNREAD.
+    messages: list[dict] = []
+    for message_id in message_ids:
+        if monotonic() > deadline:
+            logger.warning(
+                "%s deadline reached during fetch (%d of %d) — the rest stay UNREAD",
+                _PIPELINE_LOG_PREFIX,
+                len(messages),
+                len(message_ids),
+            )
+            break
+        messages.append(gmail.get_message(message_id))
     # Gmail documents no list order: internalDate ascending IS the guarantee.
-    messages = sorted(
-        (gmail.get_message(message_id) for message_id in message_ids),
-        key=lambda message: int(message["internalDate"]),
-    )
+    messages.sort(key=lambda message: int(message["internalDate"]))
     processed = failed = 0
     for position, message in enumerate(messages, start=1):
         # Between emails only: a started email always completes its sequence
@@ -126,8 +136,6 @@ def process_mailbox(
             break
         try:
             _process_one(message, trello, membretes, history, extractor)
-            gmail.modify_labels(message["id"], [procesado_id], [UNREAD_LABEL_ID])
-            processed += 1
         except Exception as exc:
             # Per-email boundary (REQ-2, deviation from the laptop's
             # batch-abort): terminal `failed` label = the operator work queue.
@@ -140,6 +148,12 @@ def process_mailbox(
             )
             gmail.modify_labels(message["id"], [failed_id], [UNREAD_LABEL_ID])
             failed += 1
+            continue
+        # OUTSIDE the boundary (Gate 3 M2): a transient relabel failure on a
+        # fully-processed email must fail the RUN (email stays UNREAD, next
+        # wake dedup-skips and relabels) — never burn a terminal failed label.
+        gmail.modify_labels(message["id"], [procesado_id], [UNREAD_LABEL_ID])
+        processed += 1
     try:
         # After processing, so this run's failures appear in the gauge (REQ-5).
         failed_total = gmail.count_messages_with_label(failed_id)
@@ -255,7 +269,9 @@ def run_pipeline() -> RunCounts:
                 deadline=monotonic() + RUN_DEADLINE_S,
             )
         finally:
-            gmail.close()
-            trello.close()
+            try:
+                gmail.close()
+            finally:
+                trello.close()
     finally:
         store.release_run_lease()

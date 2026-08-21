@@ -98,3 +98,49 @@ def test_trello_config_allows_empty_ids():
     # Fresh install: partial config is legal (REQ-1.3) — empty string, not None.
     cfg = TrelloConfig(board_id="", list_id="")
     assert cfg.board_id == ""
+
+
+def test_stale_lease_takeover_is_etag_conditional():
+    # Gate 3 M1: two processes racing a stale-lease takeover must not both win —
+    # the replace is conditional on the ETag read during the staleness check;
+    # a 412 (someone else won) reads as False.
+    from datetime import UTC, datetime, timedelta
+
+    from azure.core.exceptions import ResourceExistsError, ResourceModifiedError
+
+    from core.state_store import RUN_LEASE_STALE_S, StateStore
+
+    stale_at = datetime.now(UTC) - timedelta(seconds=RUN_LEASE_STALE_S + 60)
+
+    class RacingTable:
+        def __init__(self):
+            self.update_kwargs = None
+
+        def create_entity(self, entity):
+            raise ResourceExistsError("held")
+
+        def get_entity(self, partition, row):
+            entity = {"at": stale_at}
+
+            class E(dict):
+                metadata = {"etag": 'W/"etag-1"'}
+
+            wrapped = E(entity)
+            return wrapped
+
+        def update_entity(self, entity, mode=None, etag=None, match_condition=None):
+            self.update_kwargs = {"etag": etag, "match_condition": match_condition}
+            raise ResourceModifiedError("someone else took it (412)")
+
+    class FakeService:
+        def __init__(self, table):
+            self._t = table
+
+        def get_table_client(self, name):
+            return self._t
+
+    table = RacingTable()
+    store = StateStore(FakeService(table))
+    assert store.try_acquire_run_lease(datetime.now(UTC)) is False
+    assert table.update_kwargs["etag"] == 'W/"etag-1"'
+    assert table.update_kwargs["match_condition"] is not None

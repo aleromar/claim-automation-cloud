@@ -306,3 +306,24 @@ def test_real_client_satisfies_the_pipeline_protocol(trello):
     from pipeline.entry import TrelloPipeline
 
     assert isinstance(trello, TrelloPipeline)
+
+
+@respx.mock
+def test_find_card_requires_a_ref_boundary(trello):
+    # Gate 3 M4 (deviation from the laptop's bare substring): "2026/41" must
+    # NOT match card "2026/417" — a comunicación comment on the wrong card is
+    # worse than a miss.
+    respx.get(f"{API_BASE}/1/boards/{BOARD_ID}/lists").mock(
+        return_value=Response(200, json=[{"id": "l1"}])
+    )
+    respx.get(f"{API_BASE}/1/lists/l1/cards").mock(
+        return_value=Response(
+            200, json=[{"id": "card-417", "name": "MADRID 2026/417 X", "shortUrl": "u"}]
+        )
+    )
+    respx.get(f"{API_BASE}/1/boards/{BOARD_ID}/cards").mock(return_value=Response(200, json=[]))
+    _me_ok()
+    trello.preflight()
+    assert trello.find_card_by_claim_ref("2026/41") is None
+    card = trello.find_card_by_claim_ref("2026/417")
+    assert card is not None and card["id"] == "card-417"

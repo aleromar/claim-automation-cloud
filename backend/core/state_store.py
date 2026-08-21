@@ -15,7 +15,12 @@ from enum import StrEnum
 from functools import lru_cache
 from time import time_ns
 
-from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+from azure.core import MatchConditions
+from azure.core.exceptions import (
+    ResourceExistsError,
+    ResourceModifiedError,
+    ResourceNotFoundError,
+)
 from azure.data.tables import (
     TableClient,
     TableEntity,
@@ -219,13 +224,18 @@ class StateStore:
                 {"PartitionKey": HEARTBEAT_PARTITION, "RowKey": HEARTBEAT_ROW, **props},
                 mode=UpdateMode.REPLACE,
             )
-            table.create_entity(
-                {
-                    "PartitionKey": HEARTBEAT_HISTORY_PARTITION,
-                    "RowKey": history_row_key,
-                    **props,
-                }
-            )
+            try:
+                table.create_entity(
+                    {
+                        "PartitionKey": HEARTBEAT_HISTORY_PARTITION,
+                        "RowKey": history_row_key,
+                        **props,
+                    }
+                )
+            except Exception:
+                # Diagnostics only (Gate 3 M3): a failed history append must not
+                # fail a run whose last-run row landed — same stance as the gauge.
+                logger.warning("heartbeat history append failed — last-run row written")
 
     def write_trello_config(self, config: TrelloConfig) -> None:
         with self._lock:
@@ -297,8 +307,10 @@ class StateStore:
 
     def try_acquire_run_lease(self, now: AwareDatetime) -> bool:
         """Cross-process mutual exclusion (REQ-12): insert-if-absent is the
-        atomic acquire; a stale row (crashed holder) is taken over. In-process
-        atomicity comes from the store lock; cross-process, from create_entity."""
+        atomic acquire; a stale row (crashed holder) is taken over via an
+        ETag-CONDITIONAL replace — two processes racing the takeover would both
+        pass the staleness read, but only one wins the 412 race (Gate 3 M1;
+        the in-process lock cannot serialize across host instances)."""
         entity = {
             "PartitionKey": WORKER_STATE_PARTITION,
             "RowKey": RUN_LEASE_ROW,
@@ -310,11 +322,21 @@ class StateStore:
                 table.create_entity(entity)
                 return True
             except ResourceExistsError:
-                held_at = table.get_entity(WORKER_STATE_PARTITION, RUN_LEASE_ROW)[RUN_LEASE_AT_PROP]
-                if (now - held_at).total_seconds() > RUN_LEASE_STALE_S:
-                    table.upsert_entity(entity, mode=UpdateMode.REPLACE)
+                existing = table.get_entity(WORKER_STATE_PARTITION, RUN_LEASE_ROW)
+                if (now - existing[RUN_LEASE_AT_PROP]).total_seconds() <= RUN_LEASE_STALE_S:
+                    return False
+                try:
+                    table.update_entity(
+                        entity,
+                        mode=UpdateMode.REPLACE,
+                        etag=existing.metadata["etag"],
+                        match_condition=MatchConditions.IfNotModified,
+                    )
                     return True
-                return False
+                except (ResourceModifiedError, ResourceNotFoundError):
+                    # Another taker won (412), or the holder released between
+                    # our read and update — either way, not ours this wake.
+                    return False
 
     def release_run_lease(self) -> None:
         with self._lock:

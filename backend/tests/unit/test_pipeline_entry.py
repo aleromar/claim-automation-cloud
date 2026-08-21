@@ -576,3 +576,43 @@ def test_failure_log_carries_the_claim_ref_when_parseable(caplog):
         _run([_msg("m1", COMUNICACION_SUBJECT, 100)])  # no card found -> failed
     lines = [r.getMessage() for r in caplog.records if "email_failed" in r.getMessage()]
     assert lines and "ref=2026/417" in lines[0]
+
+
+def test_busy_exit_does_not_release_the_holders_lease(seams):
+    # Gate 3 M6: RunBusyError is raised OUTSIDE the try/finally — releasing
+    # here would delete the ACTIVE holder's lease and let a third run in.
+    from core.exceptions import RunBusyError
+    from pipeline.entry import run_pipeline
+
+    seams.lease_free = False
+    with pytest.raises(RunBusyError):
+        run_pipeline()
+    assert seams.released is False
+
+
+def test_procesado_relabel_failure_fails_the_run_not_the_email(caplog):
+    # Gate 3 M2: a fully-processed email whose success-relabel blips must NOT
+    # get the terminal failed label — the run fails, the email stays UNREAD,
+    # and the next wake dedup-skips + relabels.
+    class RelabelBlipGmail(FakeGmail):
+        def modify_labels(self, message_id, add_label_ids, remove_label_ids):
+            if add_label_ids == [f"id-{LABEL_PROCESADO}"]:
+                raise ConnectionError("gmail 500 at relabel")
+            super().modify_labels(message_id, add_label_ids, remove_label_ids)
+
+    gmail = RelabelBlipGmail([_msg("m1", CLAIM_SUBJECT, 100)])
+    with pytest.raises(ConnectionError, match="relabel"):
+        _run([_msg("m1", CLAIM_SUBJECT, 100)], gmail=gmail)
+    assert gmail.modifications == []  # in particular: no failed label
+
+
+def test_fetch_phase_honors_the_deadline():
+    # Gate 3 M5: an expired deadline stops fetching too — 100 slow fetches
+    # must not eat the functionTimeout.
+    gmail = FakeGmail([_msg("m1", CLAIM_SUBJECT, 100)])
+    fetched: list[str] = []
+    original = gmail.get_message
+    gmail.get_message = lambda message_id: (fetched.append(message_id), original(message_id))[1]
+    counts, _, _, _ = _run([_msg("m1", CLAIM_SUBJECT, 100)], gmail=gmail, deadline_offset=-1.0)
+    assert fetched == []
+    assert counts.processed == 0
