@@ -3,6 +3,12 @@ in app/ catches them, workloads in pipeline/ raise them — neither imports the
 other)."""
 
 
+class RunBusyError(Exception):
+    """Wake contract (pipeline-wiring REQ-12): the pipeline raises this when the
+    run lease is already held (timer × process-now overlap) — the scheduler
+    classifies it as the `skipped_busy` outcome; nothing was touched."""
+
+
 class NoAccessError(Exception):
     """Wake contract (gmail-client REQ-2): a workload's preflight raises this
     to signal definitively dead credentials — run_worker classifies it as the

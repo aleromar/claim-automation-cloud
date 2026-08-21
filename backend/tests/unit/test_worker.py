@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from core.state_store import Heartbeat, HeartbeatStatus
+from core.state_store import Heartbeat, HeartbeatStatus, RunCounts
 from app.worker import WORKER_RUN_LOG_PREFIX, run_scheduled_worker, run_worker
-from core.exceptions import NoAccessError
+from core.exceptions import NoAccessError, RunBusyError
 from pipeline.gmail_client import GmailNoAccessError
 
 
@@ -58,10 +58,10 @@ def _worker_run(enabled: bool, matched: int = 1):
     store = FakeStateStore(enabled=enabled, events=events)
     pipeline_calls: list[str] = []
 
-    def pipeline() -> int:
+    def pipeline() -> RunCounts:
         events.append("pipeline")
         pipeline_calls.append("called")
-        return matched
+        return RunCounts(processed=matched, failed=1, failed_total=2)
 
     outcome = run_worker(store, pipeline)
     return outcome, store, events, pipeline_calls
@@ -88,10 +88,13 @@ def test_enabled_runs_pipeline_then_heartbeat():
     assert events == ["read_enabled", "pipeline", "write_heartbeat"]
 
 
-def test_matched_count_lands_on_the_ran_heartbeat():
+def test_run_counts_land_on_the_ran_heartbeat():
+    # pipeline-wiring REQ-5: processed/failed/failed_total ride the heartbeat;
+    # matched is no longer written (5b legacy, readable on old rows only).
     _, store, _, _ = _worker_run(enabled=True, matched=3)
     (heartbeat,) = store.heartbeats
-    assert heartbeat.matched == 3
+    assert (heartbeat.processed, heartbeat.failed, heartbeat.failed_total) == (3, 1, 2)
+    assert heartbeat.matched is None
 
 
 def test_no_access_pipeline_writes_skipped_no_access(caplog):
@@ -111,7 +114,9 @@ def test_no_access_pipeline_writes_skipped_no_access(caplog):
     assert heartbeat.matched is None
     # Structured skip reason precedes the outcome line (gmail-client REQ-2).
     lines = [r.getMessage() for r in caplog.records if r.name == "app.worker"]
-    assert f"{WORKER_RUN_LOG_PREFIX} gmail_no_access reason=missing_token" in lines
+    assert (
+        f"{WORKER_RUN_LOG_PREFIX} no_access source=GmailNoAccessError reason=missing_token" in lines
+    )
 
 
 def test_scheduler_classifies_the_neutral_contract_exception():
@@ -237,11 +242,13 @@ def test_run_wake_delegates_to_the_pipeline_entry_point(monkeypatch):
     # layer (the fresh-client/close guards live in test_pipeline_entry.py).
     from app.worker import run_wake
 
-    monkeypatch.setattr("app.worker.run_pipeline", lambda: 2)
+    monkeypatch.setattr(
+        "app.worker.run_pipeline", lambda: RunCounts(processed=2, failed=0, failed_total=1)
+    )
     store = FakeStateStore(enabled=True, events=[])
     assert run_wake(store) == HeartbeatStatus.RAN
     (heartbeat,) = store.heartbeats
-    assert heartbeat.matched == 2
+    assert (heartbeat.processed, heartbeat.failed, heartbeat.failed_total) == (2, 0, 1)
 
 
 def test_scheduled_worker_uses_cached_accessor(monkeypatch):
@@ -252,3 +259,42 @@ def test_scheduled_worker_uses_cached_accessor(monkeypatch):
     monkeypatch.setattr("app.worker.get_state_store", lambda: store)
     run_scheduled_worker()
     assert [hb.status for hb in store.heartbeats] == [HeartbeatStatus.SKIPPED_DISABLED]
+
+
+def test_trello_no_access_logs_its_source(caplog):
+    # REQ-3: the skip line says WHICH workload lost access (gmail vs trello).
+    from pipeline.trello_client import TrelloNoAccessError
+
+    store = FakeStateStore(enabled=True, events=[])
+
+    def trello_dead_pipeline() -> RunCounts:
+        raise TrelloNoAccessError("missing_config")
+
+    with caplog.at_level(logging.INFO, logger="app.worker"):
+        outcome = run_worker(store, trello_dead_pipeline)
+    assert outcome == HeartbeatStatus.SKIPPED_NO_ACCESS
+    lines = [r.getMessage() for r in caplog.records if r.name == "app.worker"]
+    assert (
+        f"{WORKER_RUN_LOG_PREFIX} no_access source=TrelloNoAccessError reason=missing_config"
+        in lines
+    )
+
+
+def test_run_busy_writes_skipped_busy_and_returns(caplog):
+    # REQ-12: a held lease is a clean exit — heartbeat written, nothing raised.
+    store = FakeStateStore(enabled=True, events=[])
+
+    def busy_pipeline() -> RunCounts:
+        raise RunBusyError("lease held")
+
+    with caplog.at_level(logging.INFO, logger="app.worker"):
+        outcome = run_worker(store, busy_pipeline)
+    assert outcome == HeartbeatStatus.SKIPPED_BUSY
+    (heartbeat,) = store.heartbeats
+    assert heartbeat.status == HeartbeatStatus.SKIPPED_BUSY
+    outcome_lines = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "app.worker" and "outcome=" in r.getMessage()
+    ]
+    assert outcome_lines == [f"{WORKER_RUN_LOG_PREFIX} outcome=skipped_busy"]

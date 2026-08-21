@@ -201,3 +201,15 @@ class GmailClient:
         if self._access_token is None:
             raise RuntimeError("preflight() must succeed before Gmail API calls")
         return {"Authorization": f"Bearer {self._access_token}"}
+
+    def count_messages_with_label(self, label_id: str) -> int:
+        """One-page count for the failed-label gauge (pipeline-wiring REQ-5):
+        a nextPageToken means "more than the page" — disclosed as the 101 cap
+        rather than paying pagination for a number whose message is "a lot"."""
+        body = self._get(
+            "/gmail/v1/users/me/messages",
+            params={"labelIds": label_id, "maxResults": PROBE_MAX_RESULTS},
+        )
+        if body.get("nextPageToken"):
+            return PROBE_MAX_RESULTS + 1
+        return len(body.get("messages", []))

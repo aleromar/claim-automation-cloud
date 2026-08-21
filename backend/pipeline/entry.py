@@ -1,73 +1,249 @@
-"""Pipeline entry point — read-only Gmail probe (gmail-client REQ-3).
+"""Pipeline entry point — the real claim pipeline (pipeline-wiring, 5c).
 
-Replaces the worker-skeleton stub: list the newest UNREAD page, count the
-claim-subject matches, touch nothing. Roadmap 5c swaps the probe for the real
-processing pipeline; the wiring stands. The pipeline owns its I/O client
-(REQ-6, 2nd amendment 2026-08-21): run_pipeline builds and closes the
-GmailClient; the GmailReader protocol remains as the probe's test seam (same
-pattern as MembreteSource).
+Replaces the 5b read-only probe. `run_pipeline()` is the zero-arg wake
+contract: it acquires the run lease, composes the pipeline-owned I/O (Gmail,
+Trello, membretes, stores — REQ-6 2nd amendment), runs both preflights, and
+delegates to `process_mailbox`. Per-email order: parse+classify → ledger dedup
+→ PDF → card+attach+comment (or comunicación comment) → ledger row → relabel.
+
+Durability invariant (operator, 2026-08-21): UNREAD is the checkpoint. An
+email loses UNREAD only as its final step, so any crash/failure re-attempts it
+next wake; every redo path is idempotent or compensated. Nothing may reorder
+the relabel earlier.
 """
 
 import logging
+from datetime import UTC, datetime
 from time import monotonic
-from typing import Final, Protocol
+from typing import Final, Protocol, runtime_checkable
 
-from core.config import get_settings
+from azure.identity import DefaultAzureCredential
+from azure.storage.blob import BlobServiceClient
+
+from core.config import Settings, get_settings
+from core.exceptions import RunBusyError
 from core.secret_store import get_store
-from pipeline.claim_data import CLAIM_SUBJECT_MARKERS
+from core.state_store import ClaimRecord, RunCounts, get_state_store
+from pipeline.claim_data import (
+    CLAIM_SUBJECT_MARKERS,
+    ClaimData,
+    ClaimType,
+    build_card_comment,
+    build_card_description,
+    build_card_name,
+)
 from pipeline.gmail_client import GmailClient
+from pipeline.membrete_source import BlobMembreteSource, MembreteSource
+from pipeline.pdf_gen import generate_pdf_from_email
+from pipeline.trello_client import TrelloClient
 
 logger = logging.getLogger(__name__)
 
-# Wall-clock cap (gate E1): the Functions Consumption default functionTimeout is
-# 5 min — a degraded Gmail must fail the run while the heartbeat can still land,
-# and process-now must stay inside Azure's ~230 s HTTP idle limit.
-PROBE_DEADLINE_S: Final = 120.0
+# Wall-clock cap (gate E1, inherited from the 5b probe): a degraded backend
+# must fail/stop the run while the heartbeat can still land, and process-now
+# must stay inside Azure's ~230 s HTTP idle limit.
+RUN_DEADLINE_S: Final = 120.0
+# Laptop label names verbatim (REQ-6) — the mailbox already carries them.
+LABEL_PROCESADO: Final = "procesado"
+LABEL_FAILED: Final = "failed"
+UNREAD_LABEL_ID: Final = "UNREAD"  # Gmail system label id
 # Same queryable prefix app.worker uses; duplicated literal because pipeline/
 # must not import app (App Insights: traces | where message startswith this).
-_PROBE_LOG_PREFIX: Final = "worker_run probe"
+_PIPELINE_LOG_PREFIX: Final = "worker_run pipeline"
 
 
-class GmailReader(Protocol):
-    def preflight(self) -> None: ...
-
-    def list_unread_message_ids(self) -> list[str]: ...
-
-    def get_subject(self, message_id: str) -> str: ...
-
-
-def run_pipeline() -> int:
-    """The zero-arg wake contract: a fresh GmailClient per run (P12 by
-    non-sharing), closed on every exit."""
-    gmail = GmailClient(get_settings(), get_store())
-    try:
-        return probe(gmail)
-    finally:
-        gmail.close()
+def build_claim_query() -> str:
+    """The server-side Gmail filter, built from the single-source markers
+    (REQ-1): quoted phrases match anywhere in the subject; new claim types
+    extend the query automatically."""
+    return " OR ".join(f'subject:"{marker}"' for marker in CLAIM_SUBJECT_MARKERS)
 
 
-def probe(gmail: GmailReader) -> int:
-    """One read-only probe run: count of claim-subject-matching UNREAD emails.
+@runtime_checkable
+class GmailPipeline(Protocol):
+    """What process_mailbox needs from Gmail — the test seam, and the M8-style
+    structural proof that the real client satisfies it."""
 
-    The preflight is the body's first step (REQ-2 amendment, 2026-08-21): its
-    NoAccessError escapes for the scheduler to classify as `skipped_no_access`.
-    The count is an upper bound on processable claims: a marker match doesn't
-    guarantee the `YYYY/N` claim number or (for asistencia) a recognized
-    service in the body — 5c's processing owns those failures.
-    """
-    gmail.preflight()
-    deadline = monotonic() + PROBE_DEADLINE_S
-    message_ids = gmail.list_unread_message_ids()
-    matched = 0
-    for position, message_id in enumerate(message_ids, start=1):
+    def list_unread_message_ids(self, query: str | None = None) -> list[str]: ...
+
+    def get_message(self, message_id: str) -> dict: ...
+
+    def modify_labels(
+        self, message_id: str, add_label_ids: list[str], remove_label_ids: list[str]
+    ) -> None: ...
+
+    def get_or_create_label_id(self, name: str) -> str: ...
+
+    def count_messages_with_label(self, label_id: str) -> int: ...
+
+
+@runtime_checkable
+class TrelloPipeline(Protocol):
+    def create_full_card(
+        self, *, name: str, description: str, pdf_bytes: bytes, pdf_filename: str, comment: str
+    ) -> str: ...
+
+    def add_comment(self, card_id: str, text: str) -> None: ...
+
+    def find_card_by_claim_ref(self, claim_ref: str) -> dict | None: ...
+
+
+class ClaimLedger(Protocol):
+    def get_claim(self, claim_ref: str) -> ClaimRecord | None: ...
+
+    def record_claim(self, record: ClaimRecord) -> None: ...
+
+
+def process_mailbox(
+    gmail: GmailPipeline,
+    trello: TrelloPipeline,
+    membretes: MembreteSource,
+    history: ClaimLedger,
+    deadline: float,
+    extractor=None,
+) -> RunCounts:
+    """One run over the filtered UNREAD page, chronologically (REQ-1/2)."""
+    procesado_id = gmail.get_or_create_label_id(LABEL_PROCESADO)
+    failed_id = gmail.get_or_create_label_id(LABEL_FAILED)
+    message_ids = gmail.list_unread_message_ids(query=build_claim_query())
+    # Gmail documents no list order: internalDate ascending IS the guarantee.
+    messages = sorted(
+        (gmail.get_message(message_id) for message_id in message_ids),
+        key=lambda message: int(message["internalDate"]),
+    )
+    processed = failed = 0
+    for position, message in enumerate(messages, start=1):
+        # Between emails only: a started email always completes its sequence
+        # (REQ-2) — leftovers stay UNREAD for the next wake.
         if monotonic() > deadline:
-            # The sole degraded-Gmail breadcrumb: report actual progress.
-            raise TimeoutError(
-                f"probe exceeded its {int(PROBE_DEADLINE_S)} s deadline "
-                f"at message {position} of {len(message_ids)}"
+            logger.warning(
+                "%s deadline reached at message %d of %d — the rest stay UNREAD",
+                _PIPELINE_LOG_PREFIX,
+                position,
+                len(messages),
             )
-        subject = gmail.get_subject(message_id)
-        if any(marker in subject for marker in CLAIM_SUBJECT_MARKERS):
-            matched += 1
-    logger.info("%s matched=%d scanned=%d", _PROBE_LOG_PREFIX, matched, len(message_ids))
-    return matched
+            break
+        try:
+            _process_one(message, trello, membretes, history, extractor)
+            gmail.modify_labels(message["id"], [procesado_id], [UNREAD_LABEL_ID])
+            processed += 1
+        except Exception as exc:
+            # Per-email boundary (REQ-2, deviation from the laptop's
+            # batch-abort): terminal `failed` label = the operator work queue.
+            logger.warning(
+                "%s email_failed id=%s reason=%s", _PIPELINE_LOG_PREFIX, message["id"], exc
+            )
+            gmail.modify_labels(message["id"], [failed_id], [UNREAD_LABEL_ID])
+            failed += 1
+    try:
+        # After processing, so this run's failures appear in the gauge (REQ-5).
+        failed_total = gmail.count_messages_with_label(failed_id)
+    except Exception:
+        # A gauge blip must not fail a run whose mutations completed.
+        logger.warning("%s failed_total gauge unavailable", _PIPELINE_LOG_PREFIX)
+        failed_total = None
+    logger.info(
+        "%s processed=%d failed=%d failed_total=%s",
+        _PIPELINE_LOG_PREFIX,
+        processed,
+        failed,
+        failed_total,
+    )
+    return RunCounts(processed=processed, failed=failed, failed_total=failed_total)
+
+
+def _process_one(
+    message: dict,
+    trello: TrelloPipeline,
+    membretes: MembreteSource,
+    history: ClaimLedger,
+    extractor,
+) -> None:
+    subject = ClaimData.extract_subject(message) or ""
+    if not any(marker in subject for marker in CLAIM_SUBJECT_MARKERS):
+        # Gmail's phrase match said yes, the in-code source of truth says no —
+        # an anomaly to investigate, never left UNREAD to reappear (REQ-1).
+        raise ValueError("server filter matched but no claim marker in the subject")
+    claim = ClaimData.from_msg_data(message, extractor)
+    if claim is None:
+        raise ValueError("claim-marked subject without a parseable YYYY/N reference")
+    claim_ref = f"{claim.year}/{claim.claim_number}"
+    if claim.type is ClaimType.COMUNICACION_A_COLABORADOR:
+        # Live search on purpose (REQ-8): an archived card must fail the email;
+        # the ledger is not consulted and no row is written (RowKey collision).
+        card = trello.find_card_by_claim_ref(claim_ref)
+        if card is None:
+            raise ValueError(f"comunicación {claim_ref} has no existing card")
+        trello.add_comment(card["id"], build_card_comment(claim))
+        return
+    if history.get_claim(claim_ref) is not None:
+        # Idempotent re-delivery / forward of a processed claim (D12c): skip
+        # Trello entirely; the caller relabels and counts it processed.
+        return
+    pdf = generate_pdf_from_email(claim.email_body, claim.type, membretes)
+    card_url = trello.create_full_card(
+        name=build_card_name(claim),
+        description=build_card_description(claim),
+        pdf_bytes=pdf,
+        pdf_filename=f"claim_{claim.claim_number}_{claim.year}.pdf",
+        comment=build_card_comment(claim),
+    )
+    # Ledger BEFORE relabel (REQ-6 deviation): a crash between them leaves the
+    # email UNREAD with the row present — next wake dedup-skips and relabels.
+    history.record_claim(
+        ClaimRecord(
+            at=datetime.now(UTC),
+            claim_ref=claim_ref,
+            subject=claim.subject,
+            type=claim.type.name,
+            town=claim.town,
+            owner=claim.owner_name,
+            card_url=card_url,
+        )
+    )
+
+
+def _build_membrete_source(settings: Settings) -> BlobMembreteSource:
+    """Pipeline-owned composition (D26). Endpoint enforcement (REQ-7): under
+    managed identity a missing blob endpoint fails the RUN loudly — not the
+    whole app at startup, so routes stay alive on a misdeployed config."""
+    if settings.table_storage_backend == "managed_identity":
+        if not settings.blob_endpoint:
+            raise RuntimeError("blob_endpoint must be configured under managed_identity (REQ-7)")
+        service = BlobServiceClient(
+            account_url=settings.blob_endpoint, credential=DefaultAzureCredential()
+        )
+        return BlobMembreteSource(service, settings.membretes_container)
+    return BlobMembreteSource.from_connection_string(
+        settings.storage_connection_string, settings.membretes_container
+    )
+
+
+def run_pipeline() -> RunCounts:
+    """The zero-arg wake contract: lease → compose → preflights → process.
+    A held lease raises RunBusyError (scheduler classifies `skipped_busy`);
+    everything composed here is per-run (P12 by non-sharing) and closed on
+    every exit."""
+    settings = get_settings()
+    store = get_state_store()
+    if not store.try_acquire_run_lease(datetime.now(UTC)):
+        raise RunBusyError("run lease held — another invocation is in flight")
+    try:
+        secrets = get_store()
+        gmail = GmailClient(settings, secrets)
+        trello = TrelloClient(settings, secrets, store.read_trello_config())
+        try:
+            gmail.preflight()
+            trello.preflight()
+            return process_mailbox(
+                gmail,
+                trello,
+                _build_membrete_source(settings),
+                store,
+                deadline=monotonic() + RUN_DEADLINE_S,
+            )
+        finally:
+            gmail.close()
+            trello.close()
+    finally:
+        store.release_run_lease()

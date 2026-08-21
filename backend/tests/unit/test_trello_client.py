@@ -298,3 +298,11 @@ def test_secrets_never_logged(trello, caplog):
     for record in caplog.records:
         assert "key-123" not in record.getMessage()
         assert "token-456" not in record.getMessage()
+
+
+def test_real_client_satisfies_the_pipeline_protocol(trello):
+    # Same M8-style structural proof as the Gmail side: process_mailbox tests
+    # use fakes, so a rename must not ship green.
+    from pipeline.entry import TrelloPipeline
+
+    assert isinstance(trello, TrelloPipeline)

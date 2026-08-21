@@ -21,7 +21,7 @@ from pipeline.gmail_client import (
     GmailNoAccessError,
 )
 from core.secret_store import GMAIL_REFRESH_TOKEN, GOOGLE_CLIENT_SECRET, FileSecretStore
-from pipeline.entry import probe
+from pipeline.entry import GmailPipeline
 
 CLIENT_ID = "client-id-123"
 TOKEN_URL = "https://idp.test/token"
@@ -288,28 +288,11 @@ def test_get_subject_missing_payload_fails_loud(gmail):
         gmail.get_subject("m1")
 
 
-@respx.mock
-def test_probe_accepts_the_real_client(gmail):
-    # Gate 3 M8: the only proof GmailClient satisfies the GmailReader protocol —
-    # every other test uses hand-rolled fakes, so a method rename would ship
-    # green and AttributeError on the first connected wake.
-    _mint_ok()
-    respx.get(LIST_URL).mock(
-        return_value=Response(200, json={"messages": [{"id": "m1"}, {"id": "m2"}]})
-    )
-    respx.get(f"{LIST_URL}/m1").mock(
-        return_value=Response(
-            200,
-            json=_message(
-                "m1",
-                [{"name": "Subject", "value": "Declaración de siniestro a colaborador 2026/9"}],
-            ),
-        )
-    )
-    respx.get(f"{LIST_URL}/m2").mock(
-        return_value=Response(200, json=_message("m2", [{"name": "Subject", "value": "spam"}]))
-    )
-    assert probe(gmail) == 1  # probe mints via gmail.preflight()
+def test_real_client_satisfies_the_pipeline_protocol(gmail):
+    # Gate 3 M8 carried into 5c: every process_mailbox test uses hand-rolled
+    # fakes, so a client method rename would ship green and AttributeError on
+    # the first connected wake — the runtime_checkable protocol catches it.
+    assert isinstance(gmail, GmailPipeline)
 
 
 @respx.mock
@@ -433,3 +416,31 @@ def test_mutations_before_preflight_are_programming_errors(gmail):
         gmail.get_or_create_label_id("procesado")
     with pytest.raises(RuntimeError, match="preflight"):
         gmail.get_message("m1")
+
+
+@respx.mock
+def test_count_messages_with_label_pages_once_and_caps(gmail):
+    # 5c REQ-5 gauge: one page; a nextPageToken means "more than the page" —
+    # disclosed as the 101 cap rather than a second request.
+    _mint_ok()
+    respx.get(LIST_URL).mock(
+        return_value=Response(200, json={"messages": [{"id": f"m{i}"} for i in range(3)]})
+    )
+    gmail.preflight()
+    assert gmail.count_messages_with_label("Label_9") == 3
+
+
+@respx.mock
+def test_count_messages_with_label_caps_at_101_when_more_pages(gmail):
+    _mint_ok()
+    respx.get(LIST_URL).mock(
+        return_value=Response(
+            200,
+            json={
+                "messages": [{"id": f"m{i}"} for i in range(100)],
+                "nextPageToken": "next",
+            },
+        )
+    )
+    gmail.preflight()
+    assert gmail.count_messages_with_label("Label_9") == 101

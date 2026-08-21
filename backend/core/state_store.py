@@ -105,6 +105,15 @@ class Heartbeat(BaseModel):
     failed_total: int | None = Field(default=None, ge=0)
 
 
+class RunCounts(BaseModel):
+    """What one pipeline run reports back across the wake contract
+    (pipeline-wiring REQ-5): the scheduler maps these onto the heartbeat."""
+
+    processed: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    failed_total: int | None = Field(default=None, ge=0)  # None = gauge unavailable
+
+
 class ClaimRecord(BaseModel):
     """One ClaimHistory ledger row (pipeline-wiring REQ-4): 'successfully
     processed once' — NOT a mirror of the Trello card's current state."""

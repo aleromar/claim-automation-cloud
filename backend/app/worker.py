@@ -17,8 +17,8 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from core.exceptions import NoAccessError
-from core.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
+from core.exceptions import NoAccessError, RunBusyError
+from core.state_store import Heartbeat, HeartbeatStatus, RunCounts, StateStore, get_state_store
 from pipeline.entry import run_pipeline
 
 logger = logging.getLogger(__name__)
@@ -30,20 +30,31 @@ WORKER_RUN_LOG_PREFIX = "worker_run"  # App Insights: traces | where message sta
 
 def run_worker(
     store: StateStore,
-    pipeline: Callable[[], int],
+    pipeline: Callable[[], RunCounts],
 ) -> HeartbeatStatus:
     """Execute one wake. Storage faults propagate — the host records a failed
-    invocation (no swallow-and-continue). NoAccessError (the core wake contract,
-    raised by the pipeline's preflight first step) classifies as the skip; a
-    storage fault inside the skip branch still escapes (an except clause never
-    catches what its sibling handler raises)."""
+    invocation (no swallow-and-continue). The core wake contract exceptions
+    classify the exits: NoAccessError (any workload's preflight) → skip;
+    RunBusyError (lease held) → busy; a storage fault inside a skip branch
+    still escapes (an except clause never catches what its sibling raises)."""
     if not store.read_enabled():
         _report(store, HeartbeatStatus.SKIPPED_DISABLED)
         return HeartbeatStatus.SKIPPED_DISABLED
     try:
-        matched = pipeline()
+        counts = pipeline()
+    except RunBusyError:
+        # Another invocation holds the run lease (pipeline-wiring REQ-12):
+        # clean exit, nothing was touched.
+        _report(store, HeartbeatStatus.SKIPPED_BUSY)
+        return HeartbeatStatus.SKIPPED_BUSY
     except NoAccessError as exc:
-        logger.warning("%s gmail_no_access reason=%s", WORKER_RUN_LOG_PREFIX, exc.reason)
+        # The source type says WHICH workload lost access (gmail vs trello).
+        logger.warning(
+            "%s no_access source=%s reason=%s",
+            WORKER_RUN_LOG_PREFIX,
+            type(exc).__name__,
+            exc.reason,
+        )
         _report(store, HeartbeatStatus.SKIPPED_NO_ACCESS)
         return HeartbeatStatus.SKIPPED_NO_ACCESS
     except Exception:
@@ -52,13 +63,21 @@ def run_worker(
         # (REQ-1/2).
         _report(store, HeartbeatStatus.FAILED)
         raise
-    _report(store, HeartbeatStatus.RAN, matched)
+    _report(store, HeartbeatStatus.RAN, counts)
     return HeartbeatStatus.RAN
 
 
-def _report(store: StateStore, outcome: HeartbeatStatus, matched: int | None = None) -> None:
+def _report(store: StateStore, outcome: HeartbeatStatus, counts: RunCounts | None = None) -> None:
     """The end-of-run heartbeat + its one queryable outcome log line."""
-    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=outcome, matched=matched))
+    store.write_heartbeat(
+        Heartbeat(
+            at=datetime.now(UTC),
+            status=outcome,
+            processed=counts.processed if counts else None,
+            failed=counts.failed if counts else None,
+            failed_total=counts.failed_total if counts else None,
+        )
+    )
     logger.info("%s outcome=%s", WORKER_RUN_LOG_PREFIX, outcome.value)
 
 

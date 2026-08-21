@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from core.state_store import Heartbeat, HeartbeatStatus, get_state_store
+from core.state_store import RunCounts, Heartbeat, HeartbeatStatus, get_state_store
 
 STATUS_PATH = "/api/worker/status"
 ENABLED_PATH = "/api/worker/enabled"
@@ -138,7 +138,10 @@ def test_run_now_disabled_returns_skipped_and_writes_heartbeat(
     client, auth, fake_store, monkeypatch
 ):
     pipeline_calls: list[str] = []
-    monkeypatch.setattr("app.worker.run_pipeline", lambda: pipeline_calls.append("called"))
+    monkeypatch.setattr(
+        "app.worker.run_pipeline",
+        lambda: (pipeline_calls.append("called"), RunCounts(processed=0, failed=0))[1],
+    )
     resp = client.post(RUN_PATH, headers=auth)
     assert resp.status_code == 200
     assert resp.json() == {"outcome": HeartbeatStatus.SKIPPED_DISABLED.value}
@@ -149,7 +152,10 @@ def test_run_now_disabled_returns_skipped_and_writes_heartbeat(
 
 def test_run_now_enabled_returns_ran_and_writes_heartbeat(client, auth, fake_store, monkeypatch):
     pipeline_calls: list[str] = []
-    monkeypatch.setattr("app.worker.run_pipeline", lambda: pipeline_calls.append("called"))
+    monkeypatch.setattr(
+        "app.worker.run_pipeline",
+        lambda: (pipeline_calls.append("called"), RunCounts(processed=0, failed=0))[1],
+    )
     fake_store.enabled = True
     resp = client.post(RUN_PATH, headers=auth)
     assert resp.status_code == 200
