@@ -24,7 +24,7 @@ client secret, or `OPERATOR_EMAIL` is missing:
    this file (`make dev` / the `--env-file` flag above); the app itself reads
    only environment variables, exactly like prod.
 3. For a **real** Google login replace the placeholder client secret in the
-   store: `uv run python -c "from app.secret_store import GOOGLE_CLIENT_SECRET,
+   store: `uv run python -c "from core.secret_store import GOOGLE_CLIENT_SECRET,
    FileSecretStore; FileSecretStore('.secrets.json').set(GOOGLE_CLIENT_SECRET,
    '<value>')"`. Unit tests and e2e need none of this — they mock/stub Google
    entirely.

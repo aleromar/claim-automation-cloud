@@ -14,7 +14,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from app.secret_store import (
+from core.secret_store import (
     GMAIL_REFRESH_TOKEN,
     TRELLO_API_KEY,
     TRELLO_TOKEN,

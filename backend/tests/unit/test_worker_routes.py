@@ -59,6 +59,18 @@ def test_status_returns_enabled_and_heartbeat(client, auth, fake_store):
     assert datetime.fromisoformat(body["heartbeat"]["at"]) == at
 
 
+def test_status_heartbeat_carries_matched_count(client, auth, fake_store):
+    # gmail-client REQ-4 / Gate 2 finding 3: the probe count must reach the
+    # dashboard through the status response body, not just the stored model.
+    fake_store.heartbeat = Heartbeat(
+        at=datetime(2026, 8, 21, 12, 30, 0, tzinfo=UTC),
+        status=HeartbeatStatus.RAN,
+        matched=3,
+    )
+    body = client.get(STATUS_PATH, headers=auth).json()
+    assert body["heartbeat"]["matched"] == 3
+
+
 def test_status_heartbeat_null_when_no_run_yet(client, auth):
     resp = client.get(STATUS_PATH, headers=auth)
     assert resp.status_code == 200
@@ -92,6 +104,34 @@ def test_set_enabled_rejects_non_bool(client, auth, fake_store, body):
 
 
 # --- process-now (REQ-3) ---
+
+
+@pytest.fixture(autouse=True)
+def fake_gmail(monkeypatch):
+    """Process-now composes the full wake path, whose pipeline builds a
+    GmailClient and preflights (REQ-6 2nd amendment: construction lives in
+    pipeline.entry) — fake the seam so these route tests keep testing routing,
+    not Gmail."""
+
+    class HealthyFakeGmail:
+        def __init__(self, settings, secret_store) -> None:
+            pass
+
+        def preflight(self) -> None:
+            pass
+
+        def list_unread_message_ids(self) -> list[str]:  # pragma: no cover
+            return []
+
+        def get_subject(self, message_id: str) -> str:  # pragma: no cover
+            return ""
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("pipeline.entry.GmailClient", HealthyFakeGmail)
+    monkeypatch.setattr("pipeline.entry.get_settings", lambda: object())
+    monkeypatch.setattr("pipeline.entry.get_store", lambda: object())
 
 
 def test_run_now_disabled_returns_skipped_and_writes_heartbeat(

@@ -16,7 +16,7 @@ from azure.core.exceptions import ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
-from app.config import Settings, get_settings
+from core.config import Settings, get_settings
 
 SESSION_SIGNING_KEY: Final = "session-signing-key"
 GOOGLE_CLIENT_SECRET: Final = "google-client-secret"

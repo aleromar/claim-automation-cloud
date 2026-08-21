@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.config import Settings
-from app.secret_store import FileSecretStore, create_secret_store
+from core.config import Settings
+from core.secret_store import FileSecretStore, create_secret_store
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def test_overwrite_replaces_value(store):
 def test_trello_secret_names_in_closed_set(store):
     # settings REQ-2: Trello creds join the closed SecretName set (D25); kebab-case
     # like the existing names. Importing the constants IS the test that they exist.
-    from app.secret_store import TRELLO_API_KEY, TRELLO_TOKEN
+    from core.secret_store import TRELLO_API_KEY, TRELLO_TOKEN
 
     assert TRELLO_API_KEY == "trello-api-key"
     assert TRELLO_TOKEN == "trello-token"

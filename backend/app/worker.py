@@ -1,12 +1,13 @@
-"""Scheduled worker wake logic (worker-skeleton spec; D4/D5).
+"""Scheduled worker wake logic (worker-skeleton spec; gmail-client REQ-2/6; D4/D5).
 
 One wake: read the `enabled` flag first (missing row reads as OFF — fail-safe,
-enforced by the state store), invoke the pipeline only when ON, and write a
-heartbeat LAST on every exit path. The heartbeat is the run *report* (operator
-decision 2026-08-12): `ran` = completed, `failed` = pipeline raised (heartbeat
-written, then re-raised so App Insights also records the failure),
-`skipped_disabled` = gate exit. Item 5's token preflight adds its
-`skipped-no-access` exit the same way — heartbeat at run end.
+enforced by the state store), invoke the pipeline — whose first step is the
+Gmail token preflight (REQ-2 amendment, 2026-08-21) — and write a heartbeat
+LAST on every exit path. The heartbeat is the run *report* (operator decision
+2026-08-12): `ran` = completed (carrying the probe's matched count), `failed` =
+pipeline raised (heartbeat written, then re-raised so App Insights also records
+the failure), `skipped_disabled` = gate exit, `skipped_no_access` = the
+pipeline raised core NoAccessError (definitive credential failure).
 
 Sync on purpose: the table client is sync and the Python worker runs plain-`def`
 functions off the host's event loop (state-store consumer constraint).
@@ -16,6 +17,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from core.exceptions import NoAccessError
 from app.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
 from pipeline.entry import run_pipeline
 
@@ -26,32 +28,46 @@ WORKER_TIMER_SCHEDULE = "0 */30 * * * *"  # NCRONTAB (6-field): second 0, every 
 WORKER_RUN_LOG_PREFIX = "worker_run"  # App Insights: traces | where message startswith this
 
 
-def run_worker(store: StateStore, pipeline: Callable[[], None]) -> HeartbeatStatus:
+def run_worker(
+    store: StateStore,
+    pipeline: Callable[[], int],
+) -> HeartbeatStatus:
     """Execute one wake. Storage faults propagate — the host records a failed
-    invocation (no swallow-and-continue)."""
-    if store.read_enabled():
-        try:
-            pipeline()
-        except Exception:
-            _report(store, HeartbeatStatus.FAILED)
-            raise
-        outcome = HeartbeatStatus.RAN
-    else:
-        outcome = HeartbeatStatus.SKIPPED_DISABLED
-    _report(store, outcome)
-    return outcome
+    invocation (no swallow-and-continue). NoAccessError (the core wake contract,
+    raised by the pipeline's preflight first step) classifies as the skip; a
+    storage fault inside the skip branch still escapes (an except clause never
+    catches what its sibling handler raises)."""
+    if not store.read_enabled():
+        _report(store, HeartbeatStatus.SKIPPED_DISABLED)
+        return HeartbeatStatus.SKIPPED_DISABLED
+    try:
+        matched = pipeline()
+    except NoAccessError as exc:
+        logger.warning("%s gmail_no_access reason=%s", WORKER_RUN_LOG_PREFIX, exc.reason)
+        _report(store, HeartbeatStatus.SKIPPED_NO_ACCESS)
+        return HeartbeatStatus.SKIPPED_NO_ACCESS
+    except Exception:
+        # Anything else — transient token-endpoint failure included — says
+        # nothing about token health: a failed run, retried by the next wake
+        # (REQ-1/2).
+        _report(store, HeartbeatStatus.FAILED)
+        raise
+    _report(store, HeartbeatStatus.RAN, matched)
+    return HeartbeatStatus.RAN
 
 
-def _report(store: StateStore, outcome: HeartbeatStatus) -> None:
-    """The end-of-run heartbeat + its one queryable log line."""
-    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=outcome))
+def _report(store: StateStore, outcome: HeartbeatStatus, matched: int | None = None) -> None:
+    """The end-of-run heartbeat + its one queryable outcome log line."""
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=outcome, matched=matched))
     logger.info("%s outcome=%s", WORKER_RUN_LOG_PREFIX, outcome.value)
 
 
 def run_wake(store: StateStore) -> HeartbeatStatus:
-    """The single composition point of wake + real pipeline (PR #15 review M2):
-    the timer and the process-now endpoint both call this. Item 5 swaps
-    run_pipeline's *body* in pipeline/entry.py; this wiring stands."""
+    """The single composition point of the wake (PR #15 review M2): the timer
+    and the process-now endpoint both call this. The pipeline owns its Gmail
+    client (REQ-6, 2nd amendment 2026-08-21) — nothing Gmail-side exists at
+    this layer, and a disabled wake constructs nothing. 5c swaps run_pipeline's
+    *body* in pipeline/entry.py; this wiring stands."""
     return run_worker(store, run_pipeline)
 
 

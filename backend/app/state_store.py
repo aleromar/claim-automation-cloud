@@ -23,9 +23,9 @@ from azure.data.tables import (
     UpdateMode,
 )
 from azure.identity import DefaultAzureCredential
-from pydantic import AwareDatetime, BaseModel
+from pydantic import AwareDatetime, BaseModel, Field
 
-from app.config import Settings, get_settings
+from core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ TRELLO_CONFIG_ROW = "config"
 ENABLED_PROP = "enabled"
 HEARTBEAT_AT_PROP = "at"
 HEARTBEAT_STATUS_PROP = "status"
+HEARTBEAT_MATCHED_PROP = "matched"
 BOARD_ID_PROP = "board_id"
 LIST_ID_PROP = "list_id"
 
@@ -68,11 +69,15 @@ class HeartbeatStatus(StrEnum):
     SKIPPED_DISABLED = "skipped_disabled"  # woke, flag off, exited
     RAN = "ran"  # pipeline ran to completion
     FAILED = "failed"  # pipeline raised (added by worker-skeleton, 2026-08-12)
+    SKIPPED_NO_ACCESS = "skipped_no_access"  # token preflight failed (gmail-client, 2026-08-21)
 
 
 class Heartbeat(BaseModel):
     at: AwareDatetime  # UTC by convention — callers use datetime.now(UTC); naive input rejected
     status: HeartbeatStatus
+    # Probe count for `ran` outcomes (gmail-client REQ-4); None otherwise and on
+    # rows written before 5b — Table Storage has no null, so None is "property absent".
+    matched: int | None = Field(default=None, ge=0)
 
 
 class TrelloConfig(BaseModel):
@@ -143,16 +148,17 @@ class StateStore:
             )
 
     def write_heartbeat(self, heartbeat: Heartbeat) -> None:
+        entity = {
+            "PartitionKey": HEARTBEAT_PARTITION,
+            "RowKey": HEARTBEAT_ROW,
+            HEARTBEAT_AT_PROP: heartbeat.at,
+            HEARTBEAT_STATUS_PROP: heartbeat.status.value,
+        }
+        if heartbeat.matched is not None:
+            entity[HEARTBEAT_MATCHED_PROP] = heartbeat.matched
         with self._lock:
-            self._table(HEARTBEAT_TABLE).upsert_entity(
-                {
-                    "PartitionKey": HEARTBEAT_PARTITION,
-                    "RowKey": HEARTBEAT_ROW,
-                    HEARTBEAT_AT_PROP: heartbeat.at,
-                    HEARTBEAT_STATUS_PROP: heartbeat.status.value,
-                },
-                mode=UpdateMode.REPLACE,
-            )
+            # REPLACE (not MERGE) so a countless outcome drops any stale matched.
+            self._table(HEARTBEAT_TABLE).upsert_entity(entity, mode=UpdateMode.REPLACE)
 
     def write_trello_config(self, config: TrelloConfig) -> None:
         with self._lock:
@@ -181,6 +187,7 @@ class StateStore:
         return Heartbeat(
             at=entity[HEARTBEAT_AT_PROP],
             status=HeartbeatStatus(entity[HEARTBEAT_STATUS_PROP]),
+            matched=entity.get(HEARTBEAT_MATCHED_PROP),
         )
 
 

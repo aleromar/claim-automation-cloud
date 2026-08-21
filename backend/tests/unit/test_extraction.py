@@ -10,7 +10,7 @@ import base64
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from core.config import Settings
 from pipeline.claim_data import ClaimData, ClaimType
 from pipeline.extraction import (
     EXTRACTOR_REGEX,

@@ -7,7 +7,7 @@ leaks into every test that constructs Settings (the OPERATOR_EMAIL
 monkeypatch.delenv incident, 2026-08-11).
 """
 
-from app.config import Settings
+from core.config import Settings
 
 
 def test_settings_ignore_dotenv_in_cwd(tmp_path, monkeypatch):

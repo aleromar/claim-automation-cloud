@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import WorkerControls from "./WorkerControls";
 
-type HeartbeatBody = { at: string; status: string } | null;
+type HeartbeatBody = {
+  at: string;
+  status: string;
+  matched?: number | null;
+} | null;
 
 const statusResponse = (enabled: boolean, heartbeat: HeartbeatBody) => () =>
   new Response(JSON.stringify({ enabled, heartbeat }), { status: 200 });
@@ -63,6 +67,106 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     expect(
       screen.getByRole("switch", { name: /worker enabled/i }),
     ).toBeChecked();
+  });
+
+  it("renders the Gmail-reconnect label for skipped_no_access (gmail-client REQ-5)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T10:30:00+00:00",
+        status: "skipped_no_access",
+      }),
+    });
+    render(<WorkerControls />);
+    const lastRun = await screen.findByText(/last run:/i);
+    expect(lastRun).toHaveTextContent(/skipped \(gmail needs reconnect\)/i);
+  });
+
+  it("renders the matched count next to a ran heartbeat (gmail-client REQ-5)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T10:30:00+00:00",
+        status: "ran",
+        matched: 3,
+      }),
+    });
+    render(<WorkerControls />);
+    const lastRun = await screen.findByText(/last run:/i);
+    expect(lastRun).toHaveTextContent(/ran — 3 matching emails/i);
+  });
+
+  it("renders a singular label for exactly one matched email", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T10:30:00+00:00",
+        status: "ran",
+        matched: 1,
+      }),
+    });
+    render(<WorkerControls />);
+    const lastRun = await screen.findByText(/last run:/i);
+    expect(lastRun).toHaveTextContent(/ran — 1 matching email(?!s)/i);
+  });
+
+  it("treats a non-numeric matched as a broken contract (error state)", async () => {
+    mockWorkerApi({
+      status: () =>
+        new Response(
+          JSON.stringify({
+            enabled: true,
+            heartbeat: {
+              at: "2026-08-21T10:30:00+00:00",
+              status: "ran",
+              matched: "3",
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+    render(<WorkerControls />);
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /worker status unavailable/i,
+      ),
+    );
+  });
+
+  it("renders a zero matched count (0 is a successful probe, not absence)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T10:30:00+00:00",
+        status: "ran",
+        matched: 0,
+      }),
+    });
+    render(<WorkerControls />);
+    const lastRun = await screen.findByText(/last run:/i);
+    expect(lastRun).toHaveTextContent(/ran — 0 matching emails/i);
+  });
+
+  it("renders no count when matched is absent (older backends / pre-5b rows)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T10:30:00+00:00",
+        status: "ran",
+      }),
+    });
+    render(<WorkerControls />);
+    const lastRun = await screen.findByText(/last run:/i);
+    expect(lastRun).toHaveTextContent(/ran/i);
+    expect(lastRun).not.toHaveTextContent(/matching emails/i);
+  });
+
+  it("renders no count when matched is null (non-ran outcomes)", async () => {
+    mockWorkerApi({
+      status: statusResponse(true, {
+        at: "2026-08-21T10:30:00+00:00",
+        status: "failed",
+        matched: null,
+      }),
+    });
+    render(<WorkerControls />);
+    const lastRun = await screen.findByText(/last run:/i);
+    expect(lastRun).not.toHaveTextContent(/matching emails/i);
   });
 
   it("shows the error state when the status fetch fails", async () => {
@@ -150,6 +254,26 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
   });
 
   it("renders an unknown outcome value raw instead of crashing (REQ-4.5)", async () => {
+    // Exemplar changed at the gmail-client gate (X2): skipped_no_access is a
+    // KNOWN outcome now — any still-unknown string proves the degrade rule.
+    mockWorkerApi({
+      run: () =>
+        new Response(JSON.stringify({ outcome: "paused_maintenance" }), {
+          status: 200,
+        }),
+    });
+    render(<WorkerControls />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /process now/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/run result:/i)).toHaveTextContent(
+        /paused_maintenance/,
+      ),
+    );
+  });
+
+  it("labels a skipped_no_access run result (gmail-client REQ-5)", async () => {
     mockWorkerApi({
       run: () =>
         new Response(JSON.stringify({ outcome: "skipped_no_access" }), {
@@ -162,7 +286,7 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
     );
     await waitFor(() =>
       expect(screen.getByText(/run result:/i)).toHaveTextContent(
-        /skipped_no_access/,
+        /skipped \(gmail needs reconnect\)/i,
       ),
     );
   });

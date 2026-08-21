@@ -385,3 +385,16 @@ class TestGmailPayloadShapes:
         assert claim.email_body == ""
         assert claim.insurance_company is None
         assert claim.nif is None
+
+
+def test_every_claim_subject_marker_is_recognized_by_from_subject():
+    # gmail-client C6 / Gate 2 finding 1: the probe counts by CLAIM_SUBJECT_MARKERS —
+    # every marker must be a subject from_subject actually classifies, or the probe
+    # would count emails classification later rejects.
+    from pipeline.claim_data import CLAIM_SUBJECT_MARKERS
+
+    for marker in CLAIM_SUBJECT_MARKERS:
+        claim_type = ClaimType.from_subject(
+            f"AVISO: {marker} 2026/1", "atención: SERVICIO BRICO HOGAR"
+        )
+        assert claim_type is not None, f"marker not classified: {marker!r}"
