@@ -6,8 +6,8 @@ now that the worker routes compose a store per click.
 
 import pytest
 
-import app.state_store
-from app.state_store import get_state_store
+import core.state_store
+from core.state_store import get_state_store
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,7 @@ def test_get_state_store_is_cached(monkeypatch):
         constructions.append(settings)
         return object()
 
-    monkeypatch.setattr(app.state_store, "state_store_from_settings", counting_factory)
+    monkeypatch.setattr(core.state_store, "state_store_from_settings", counting_factory)
     first = get_state_store()
     second = get_state_store()
     assert first is second

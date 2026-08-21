@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.state_store import Heartbeat, HeartbeatStatus, TrelloConfig
+from core.state_store import Heartbeat, HeartbeatStatus, TrelloConfig
 
 
 def test_heartbeat_rejects_naive_datetime():

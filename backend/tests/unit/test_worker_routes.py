@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.state_store import Heartbeat, HeartbeatStatus, get_state_store
+from core.state_store import Heartbeat, HeartbeatStatus, get_state_store
 
 STATUS_PATH = "/api/worker/status"
 ENABLED_PATH = "/api/worker/enabled"

@@ -18,7 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from core.exceptions import NoAccessError
-from app.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
+from core.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
 from pipeline.entry import run_pipeline
 
 logger = logging.getLogger(__name__)

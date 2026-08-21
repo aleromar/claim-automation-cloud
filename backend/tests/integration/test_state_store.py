@@ -12,7 +12,7 @@ import pytest
 from azure.core.exceptions import ResourceNotFoundError
 
 from core.config import Settings
-from app.state_store import (
+from core.state_store import (
     ALL_TABLES,
     ENABLED_PROP,
     ENABLED_ROW,
@@ -169,7 +169,7 @@ def test_heartbeat_matched_roundtrip(store):
 def test_heartbeat_row_without_matched_reads_none(service, prefix, store):
     # gmail-client REQ-4: rows written before 5b lack the property entirely —
     # they must read as matched=None, no migration.
-    from app.state_store import (
+    from core.state_store import (
         HEARTBEAT_AT_PROP,
         HEARTBEAT_PARTITION,
         HEARTBEAT_ROW,

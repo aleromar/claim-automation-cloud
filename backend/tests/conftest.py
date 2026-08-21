@@ -7,7 +7,7 @@ from core.config import get_settings
 from app.main import app
 from core.secret_store import SESSION_SIGNING_KEY, FileSecretStore, get_store
 from app.security import mint_session_jwt
-from app.state_store import Heartbeat, TrelloConfig, get_state_store
+from core.state_store import Heartbeat, TrelloConfig, get_state_store
 
 SIGNING_KEY = "k" * 32
 OPERATOR = "operator@example.com"

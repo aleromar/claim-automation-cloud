@@ -22,7 +22,7 @@ from core.secret_store import (
     get_store,
 )
 from app.security import require_operator
-from app.state_store import StateStore, TrelloConfig, get_state_store
+from core.state_store import StateStore, TrelloConfig, get_state_store
 
 logger = logging.getLogger(__name__)
 

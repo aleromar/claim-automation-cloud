@@ -27,7 +27,7 @@ from azure.core.exceptions import ResourceNotFoundError
 from azure.data.tables import TableServiceClient
 
 from core.secret_store import GOOGLE_CLIENT_SECRET, SESSION_SIGNING_KEY, FileSecretStore
-from app.state_store import (
+from core.state_store import (
     ENABLED_ROW,
     HEARTBEAT_PARTITION,
     HEARTBEAT_ROW,
