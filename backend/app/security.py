@@ -12,8 +12,8 @@ import time
 import jwt
 from fastapi import Depends, HTTPException, Request
 
-from app.config import Settings, get_settings
-from app.secret_store import SESSION_SIGNING_KEY, get_store, require_secret
+from core.config import Settings, get_settings
+from core.secret_store import SESSION_SIGNING_KEY, get_store, require_secret
 
 STATE_TTL_SECONDS = 600
 

@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
 
-from app.config import Settings
+from core.config import Settings
 from app.state_store import (
     ALL_TABLES,
     ENABLED_PROP,

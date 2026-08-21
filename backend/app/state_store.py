@@ -25,7 +25,7 @@ from azure.data.tables import (
 from azure.identity import DefaultAzureCredential
 from pydantic import AwareDatetime, BaseModel, Field
 
-from app.config import Settings, get_settings
+from core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 

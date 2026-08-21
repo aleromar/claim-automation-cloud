@@ -3,9 +3,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
+from core.config import get_settings
 from app.main import app
-from app.secret_store import SESSION_SIGNING_KEY, FileSecretStore, get_store
+from core.secret_store import SESSION_SIGNING_KEY, FileSecretStore, get_store
 from app.security import mint_session_jwt
 from app.state_store import Heartbeat, TrelloConfig, get_state_store
 

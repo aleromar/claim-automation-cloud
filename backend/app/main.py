@@ -12,8 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.auth_routes import router as auth_router
-from app.config import get_settings
-from app.secret_store import (
+from core.config import get_settings
+from core.secret_store import (
     GOOGLE_CLIENT_SECRET,
     SESSION_SIGNING_KEY,
     create_secret_store,

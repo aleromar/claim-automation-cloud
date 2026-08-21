@@ -13,7 +13,7 @@ import respx
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.secret_store import (
+from core.secret_store import (
     GMAIL_REFRESH_TOKEN,
     TRELLO_API_KEY,
     TRELLO_TOKEN,

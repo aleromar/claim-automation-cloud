@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from core.config import Settings
 
 
 def test_backend_defaults_to_connection_string():

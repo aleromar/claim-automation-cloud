@@ -37,7 +37,7 @@ azurite:
 		sleep 0.5; \
 	done; echo "Azurite ready on :10002"
 
-# The app reads process env vars only (prod parity — see app/config.py); the
+# The app reads process env vars only (prod parity — see core/config.py); the
 # launcher injects backend/.env. Checked before azurite so a missing file
 # errors before Docker spins up.
 env-check:

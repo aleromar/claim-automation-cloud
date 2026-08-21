@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.gmail_client import GmailNoAccessError
+from pipeline.gmail_client import GmailNoAccessError
 from app.state_store import Heartbeat, HeartbeatStatus
 from app.worker import WORKER_RUN_LOG_PREFIX, run_scheduled_worker, run_worker
 

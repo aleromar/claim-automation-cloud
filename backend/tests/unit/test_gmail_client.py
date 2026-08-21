@@ -12,15 +12,15 @@ import pytest
 import respx
 from httpx import Response
 
-from app.config import Settings
-from app.gmail_client import (
+from core.config import Settings
+from pipeline.gmail_client import (
     MISSING_TOKEN,
     PROBE_MAX_RESULTS,
     TOKEN_REJECTED,
     GmailClient,
     GmailNoAccessError,
 )
-from app.secret_store import GMAIL_REFRESH_TOKEN, GOOGLE_CLIENT_SECRET, FileSecretStore
+from core.secret_store import GMAIL_REFRESH_TOKEN, GOOGLE_CLIENT_SECRET, FileSecretStore
 from pipeline.entry import run_pipeline
 
 CLIENT_ID = "client-id-123"
@@ -180,7 +180,7 @@ def test_token_values_never_logged_on_rejection(gmail, caplog):
     _mock_token({"error": "invalid_grant"}, status=400)
     with caplog.at_level(logging.DEBUG), pytest.raises(GmailNoAccessError):
         gmail.preflight()
-    rejection_lines = [r.getMessage() for r in caplog.records if r.name == "app.gmail_client"]
+    rejection_lines = [r.getMessage() for r in caplog.records if r.name == "pipeline.gmail_client"]
     assert any("invalid_grant" in line for line in rejection_lines)
     for record in caplog.records:
         assert REFRESH_TOKEN not in record.getMessage()
@@ -206,7 +206,7 @@ def test_constructor_builds_no_http_client(settings, secrets, monkeypatch):
     def exploding_client(*args, **kwargs):
         raise AssertionError("constructor must not build the httpx client")
 
-    monkeypatch.setattr("app.gmail_client.httpx.Client", exploding_client)
+    monkeypatch.setattr("pipeline.gmail_client.httpx.Client", exploding_client)
     client = GmailClient(settings, secrets)
     client.close()  # close on a never-used client must be safe too
 

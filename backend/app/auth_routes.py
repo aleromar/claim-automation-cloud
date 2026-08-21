@@ -15,8 +15,8 @@ import jwt
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 
-from app.config import Settings, get_settings
-from app.secret_store import (
+from core.config import Settings, get_settings
+from core.secret_store import (
     GMAIL_REFRESH_TOKEN,
     GOOGLE_CLIENT_SECRET,
     SESSION_SIGNING_KEY,

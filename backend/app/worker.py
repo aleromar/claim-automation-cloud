@@ -17,9 +17,9 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from app.config import get_settings
-from app.gmail_client import GmailClient, GmailNoAccessError
-from app.secret_store import get_store
+from core.config import get_settings
+from pipeline.gmail_client import GmailClient, GmailNoAccessError
+from core.secret_store import get_store
 from app.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
 from pipeline.entry import run_pipeline
 

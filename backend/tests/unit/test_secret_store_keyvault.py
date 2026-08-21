@@ -13,8 +13,8 @@ import pytest
 from azure.core.exceptions import ResourceNotFoundError
 from pydantic import ValidationError
 
-from app.config import Settings
-from app.secret_store import KeyVaultSecretStore, create_secret_store
+from core.config import Settings
+from core.secret_store import KeyVaultSecretStore, create_secret_store
 
 VAULT_URI = "https://kv-claim-test.vault.azure.net/"
 
@@ -74,8 +74,8 @@ def test_ops_are_serialized_across_threads(store, client):
 def test_default_credential_used_when_no_client():
     """Managed identity in Azure, az CLI locally — via DefaultAzureCredential (REQ-2.1)."""
     with (
-        patch("app.secret_store.SecretClient") as sc,
-        patch("app.secret_store.DefaultAzureCredential") as cred,
+        patch("core.secret_store.SecretClient") as sc,
+        patch("core.secret_store.DefaultAzureCredential") as cred,
     ):
         KeyVaultSecretStore(VAULT_URI)
     sc.assert_called_once_with(vault_url=VAULT_URI, credential=cred.return_value)
@@ -83,7 +83,7 @@ def test_default_credential_used_when_no_client():
 
 def test_factory_selects_keyvault_backend():
     settings = Settings(secret_store_backend="keyvault", key_vault_uri=VAULT_URI)
-    with patch("app.secret_store.SecretClient"), patch("app.secret_store.DefaultAzureCredential"):
+    with patch("core.secret_store.SecretClient"), patch("core.secret_store.DefaultAzureCredential"):
         store = create_secret_store(settings)
     assert isinstance(store, KeyVaultSecretStore)
 

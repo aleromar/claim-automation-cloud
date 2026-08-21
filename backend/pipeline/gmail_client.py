@@ -17,8 +17,8 @@ from typing import Final, Literal
 
 import httpx
 
-from app.config import Settings
-from app.secret_store import (
+from core.config import Settings
+from core.secret_store import (
     GMAIL_REFRESH_TOKEN,
     GOOGLE_CLIENT_SECRET,
     SecretStore,
