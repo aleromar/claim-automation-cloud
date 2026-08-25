@@ -8,10 +8,7 @@ name: deploy
 # hatch for "the suite is broken for external reasons and the app must ship".
 on:
   push:
-    # live-e2e listed as a ONE-OFF so the gate can be watched running in Actions
-    # before merge — the follow-up commit drops it back to [main]. The deploy
-    # jobs are ref-guarded below and never deploy from a branch.
-    branches: [main, live-e2e]
+    branches: [main]
     paths:
       - "backend/**"
       - "frontend/**"
