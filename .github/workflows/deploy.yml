@@ -1,0 +1,224 @@
+name: deploy
+
+# Merged deploy pipeline (live-e2e spec REQ-3): the live suite runs first and
+# BOTH deploys gate on it — a pipeline that can't process a claim never ships.
+# Docs-only pushes run nothing (path filter), matching the old two-workflow
+# behavior. workflow_dispatch forces both deploys (the provision-recovery path)
+# but still runs the live gate UNLESS skip_live_e2e is checked — the escape
+# hatch for "the suite is broken for external reasons and the app must ship".
+on:
+  push:
+    # live-e2e listed as a ONE-OFF so the gate can be watched running in Actions
+    # before merge — the follow-up commit drops it back to [main]. The deploy
+    # jobs are ref-guarded below and never deploy from a branch.
+    branches: [main, live-e2e]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "e2e/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      skip_live_e2e:
+        description: "Skip the live e2e gate (emergency deploy only)"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+# One live run at a time — two runs would race on the single real mailbox.
+# cancel-in-progress stays false: a cancelled run aborts teardown mid-mutation.
+concurrency:
+  group: live-e2e
+  cancel-in-progress: false
+
+# The suffix is bicep uniqueString() — a deterministic hash of subscription + RG,
+# so the name is stable; update only if the app is re-provisioned elsewhere.
+env:
+  FUNCTIONAPP_NAME: func-claim-automation-f3q5hnwb6i5wk
+  SWA_NAME: swa-claim-automation
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # paths-filter handles the push edge cases a raw git diff gets wrong:
+      # zero-`before` on branch creation, force pushes, multi-commit merges.
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            backend:
+              - "backend/**"
+            frontend:
+              - "frontend/**"
+
+  live-e2e:
+    if: github.event_name != 'workflow_dispatch' || !inputs.skip_live_e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # These are REPO-level secrets (gh secret set -f e2e/.env.live) — this job
+    # deliberately has no `environment:`, so environment-scoped secrets would
+    # resolve empty here. Keep the live credentials at repo scope.
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+      TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
+      TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
+      TRELLO_BOARD_ID: ${{ secrets.TRELLO_BOARD_ID }}
+      TRELLO_LIST_ID: ${{ secrets.TRELLO_LIST_ID }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - run: uv sync
+        working-directory: backend
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: frontend
+      - name: Install e2e deps + browser
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      # Waits for both table (:10002) and blob (:10000) readiness — the live
+      # global-setup uploads the membrete to blob first thing.
+      - name: Start Azurite
+        run: make azurite
+      - name: Run live Playwright suite (real Gmail + Trello)
+        working-directory: e2e
+        run: npx playwright test -c playwright.live.config.ts
+
+  deploy-functions:
+    needs: [changes, live-e2e]
+    # always() overrides the implied success(): on a skip_live_e2e dispatch the
+    # gate job is 'skipped' and the deploy must still run; a FAILED gate still
+    # blocks (result must be success or skipped).
+    if: >-
+      always()
+      && github.ref == 'refs/heads/main'
+      && contains(fromJSON('["success", "skipped"]'), needs.live-e2e.result)
+      && needs.changes.result == 'success'
+      && (needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    # Hard wall-clock bound: the smoke poll alone can burn ~5.5 min, and a
+    # hung connection must fail the run, not stall it against the 6 h cap.
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      # The workflow is the only place that knows the SHA (version-display REQ-2.1);
+      # the file is gitignored and travels inside the artifact. Must run before
+      # the functions-action package step below — that's the step that zips
+      # backend/ (vendoring never touches app/).
+      - name: Stamp build version into the artifact
+        run: echo "${GITHUB_SHA}" > backend/app/build_version.txt
+
+      # On Linux Consumption with RBAC the functions-action forces
+      # WEBSITE_RUN_FROM_PACKAGE and skips the Oryx remote build, so the
+      # package must ship its dependencies in .python_packages (the path the
+      # Python worker adds to sys.path).
+      - name: Vendor dependencies for run-from-package
+        working-directory: backend
+        run: |
+          uv export --frozen --no-dev --no-emit-project -o requirements.txt
+          uv pip install --python 3.12 \
+            --target .python_packages/lib/site-packages -r requirements.txt
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: Azure/functions-action@bc63708cc6539760eea18d8a7de4ce8ef5fdf593 # v1
+        with:
+          app-name: ${{ env.FUNCTIONAPP_NAME }}
+          package: backend
+          respect-funcignore: true
+
+      # Poll until health reports the deployed SHA (version-display REQ-2.3).
+      # curl --retry is not enough: old instances answer 200 with the previous
+      # version during the package swap, and a lost stamp answers "dev".
+      - name: Smoke — health reports the deployed version
+        run: |
+          sleep 30
+          last=""
+          for i in $(seq 1 20); do
+            last=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+              "https://${FUNCTIONAPP_NAME}.azurewebsites.net/api/health" \
+              | jq -r '.version // empty' || true)
+            if [ "${last}" = "${GITHUB_SHA}" ]; then
+              echo "Deployed version confirmed: ${last}"
+              exit 0
+            fi
+            echo "attempt ${i}/20: observed '${last:-no response}', want ${GITHUB_SHA}; retrying in 15s"
+            sleep 15
+          done
+          echo "ERROR: health never reported ${GITHUB_SHA}; last observed: '${last:-no response}'"
+          echo "('dev' = stamp lost from the package; an old SHA = package not swapped)"
+          exit 1
+
+  deploy-swa:
+    needs: [changes, live-e2e]
+    if: >-
+      always()
+      && github.ref == 'refs/heads/main'
+      && contains(fromJSON('["success", "skipped"]'), needs.live-e2e.result)
+      && needs.changes.result == 'success'
+      && (needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build with the prod API origin (deployment REQ-4.2) + version stamp (version-display REQ-2.2)
+        working-directory: frontend
+        run: |
+          npm ci
+          VITE_API_BASE_URL="https://${FUNCTIONAPP_NAME}.azurewebsites.net" \
+            VITE_BUILD_VERSION="${GITHUB_SHA}" npm run build
+
+      # A mis-named env var would silently ship a "dev" footer (version-display REQ-2.5).
+      - name: Verify the build stamp landed in the bundle
+        run: grep -rq "${GITHUB_SHA}" frontend/dist
+
+      - name: Fetch SWA deployment token at run time (REQ-3.3 — never stored)
+        id: swa
+        run: |
+          token=$(az staticwebapp secrets list -n "${SWA_NAME}" --query properties.apiKey -o tsv)
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      - uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          action: upload
+          app_location: frontend/dist
+          skip_app_build: true

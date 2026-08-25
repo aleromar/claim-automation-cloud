@@ -1,6 +1,6 @@
 """version-display REQ-1.2/1.3: build-version reader.
 
-The stamp file is written by deploy-functions.yml only; everywhere else the
+The stamp file is written by deploy.yml's deploy-functions job only; everywhere else the
 reader falls back to DEV_VERSION. Exact-value asserts live here (injected
 path) — test_health.py deliberately checks shape only (review gate R-3).
 """

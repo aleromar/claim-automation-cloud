@@ -1,4 +1,4 @@
-.PHONY: install dev env-check seed-dev test lint e2e azurite backend-test frontend-test backend-lint frontend-lint
+.PHONY: install dev env-check env-live-check seed-dev test lint e2e e2e-live azurite backend-test frontend-test backend-lint frontend-lint
 
 # Install dependencies for both stacks.
 install:
@@ -32,10 +32,12 @@ azurite:
 	@docker start claim-azurite 2>/dev/null || docker run -d --name claim-azurite \
 		-p 127.0.0.1:10000:10000 -p 127.0.0.1:10001:10001 -p 127.0.0.1:10002:10002 \
 		$(AZURITE_IMAGE) $(AZURITE_CMD)
-	@i=0; until nc -z 127.0.0.1 10002 2>/dev/null; do \
-		i=$$((i+1)); if [ $$i -ge 60 ]; then echo "ERROR: Azurite not ready on :10002 after 30s"; exit 1; fi; \
-		sleep 0.5; \
-	done; echo "Azurite ready on :10002"
+	@for port in 10000 10002; do \
+		i=0; until nc -z 127.0.0.1 $$port 2>/dev/null; do \
+			i=$$((i+1)); if [ $$i -ge 60 ]; then echo "ERROR: Azurite not ready on :$$port after 30s"; exit 1; fi; \
+			sleep 0.5; \
+		done; \
+	done; echo "Azurite ready (blob :10000, tables :10002)"
 
 # The app reads process env vars only (prod parity — see core/config.py); the
 # launcher injects backend/.env. Checked before azurite so a missing file
@@ -85,3 +87,13 @@ frontend-lint:
 # fetches table-backed worker status on login (worker-controls REQ-7.3).
 e2e: azurite
 	cd e2e && npx playwright test
+
+# LIVE end-to-end (live-e2e spec): real Gmail dev account + real Trello test board.
+# Credentials from e2e/.env.live (gitignored). Don't run while a main push's CI
+# live run is in flight — both share the one real mailbox (spec: mutual exclusion).
+# env checked BEFORE azurite (same rule as env-check: error before Docker spins up).
+env-live-check:
+	@test -f e2e/.env.live || { echo "ERROR: e2e/.env.live missing — cp e2e/.env.live.example e2e/.env.live and fill it in"; exit 1; }
+
+e2e-live: env-live-check azurite
+	cd e2e && set -a && . ./.env.live && set +a && npx playwright test -c playwright.live.config.ts
