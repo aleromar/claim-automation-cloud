@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     google_auth_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
     google_token_url: str = "https://oauth2.googleapis.com/token"
     gmail_api_base_url: str = "https://gmail.googleapis.com"
+    trello_api_base_url: str = "https://api.trello.com"
     oauth_redirect_uri: str = "http://localhost:8000/api/auth/callback"
     operator_email: str = ""  # single-operator gate; startup fails fast when empty
     frontend_base_url: str = "http://localhost:5173"

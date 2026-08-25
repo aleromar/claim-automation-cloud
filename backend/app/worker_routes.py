@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, StrictBool
 
 from app.security import require_operator
-from app.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
+from core.state_store import Heartbeat, HeartbeatStatus, StateStore, get_state_store
 from app.worker import run_wake
 
 router = APIRouter(prefix="/api/worker", dependencies=[Depends(require_operator)])

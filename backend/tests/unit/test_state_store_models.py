@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.state_store import Heartbeat, HeartbeatStatus, TrelloConfig
+from core.state_store import ClaimRecord, Heartbeat, HeartbeatStatus, TrelloConfig
 
 
 def test_heartbeat_rejects_naive_datetime():
@@ -37,6 +37,56 @@ def test_heartbeat_carries_matched_count():
     assert hb.matched == 3
 
 
+def test_heartbeat_status_has_skipped_busy():
+    # pipeline-wiring REQ-12: the run-lease exit, snake_case like its siblings.
+    assert HeartbeatStatus.SKIPPED_BUSY.value == "skipped_busy"
+
+
+def test_heartbeat_counts_default_to_none():
+    # pipeline-wiring REQ-5: rows predating 5c carry no counts.
+    hb = Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN)
+    assert hb.processed is None
+    assert hb.failed is None
+    assert hb.failed_total is None
+
+
+def test_heartbeat_carries_run_counts():
+    hb = Heartbeat(
+        at=datetime.now(UTC),
+        status=HeartbeatStatus.RAN,
+        processed=3,
+        failed=1,
+        failed_total=2,
+    )
+    assert (hb.processed, hb.failed, hb.failed_total) == (3, 1, 2)
+
+
+def test_claim_record_rejects_naive_datetime():
+    # Same stance as Heartbeat: naive input would be silently shifted by the SDK.
+    with pytest.raises(ValidationError):
+        ClaimRecord(
+            at=datetime(2026, 1, 1, 12, 0, 0),
+            claim_ref="2026/417",
+            subject="Declaración de siniestro a colaborador 2026/417",
+            type="DECLARACION_SINIESTRO",
+            card_url="https://trello.com/c/abc123",
+        )
+
+
+def test_claim_record_optional_fields_default_none():
+    # town/owner are extraction results and may be absent (laptop parity: the
+    # regex extractor returns None fields; the JSONL wrote them as-is).
+    record = ClaimRecord(
+        at=datetime.now(UTC),
+        claim_ref="2026/417",
+        subject="s",
+        type="DECLARACION_SINIESTRO",
+        card_url="",
+    )
+    assert record.town is None
+    assert record.owner is None
+
+
 def test_trello_config_holds_board_and_list_ids():
     # settings REQ-1/2: the TrelloConfig row carries the two runtime-entered IDs (D23).
     cfg = TrelloConfig(board_id="g7vysmjD", list_id="68875e0d401d7613fcbbc092")
@@ -48,3 +98,109 @@ def test_trello_config_allows_empty_ids():
     # Fresh install: partial config is legal (REQ-1.3) — empty string, not None.
     cfg = TrelloConfig(board_id="", list_id="")
     assert cfg.board_id == ""
+
+
+def test_stale_lease_takeover_is_etag_conditional():
+    # Gate 3 M1: two processes racing a stale-lease takeover must not both win —
+    # the replace is conditional on the ETag read during the staleness check;
+    # a 412 (someone else won) reads as False.
+    from datetime import UTC, datetime, timedelta
+
+    from azure.core.exceptions import ResourceExistsError, ResourceModifiedError
+
+    from core.state_store import RUN_LEASE_STALE_S, StateStore
+
+    stale_at = datetime.now(UTC) - timedelta(seconds=RUN_LEASE_STALE_S + 60)
+
+    class RacingTable:
+        def __init__(self):
+            self.update_kwargs = None
+
+        def create_entity(self, entity):
+            raise ResourceExistsError("held")
+
+        def get_entity(self, partition, row):
+            entity = {"at": stale_at}
+
+            class E(dict):
+                metadata = {"etag": 'W/"etag-1"'}
+
+            wrapped = E(entity)
+            return wrapped
+
+        def update_entity(self, entity, mode=None, etag=None, match_condition=None):
+            self.update_kwargs = {"etag": etag, "match_condition": match_condition}
+            raise ResourceModifiedError("someone else took it (412)")
+
+    class FakeService:
+        def __init__(self, table):
+            self._t = table
+
+        def get_table_client(self, name):
+            return self._t
+
+    table = RacingTable()
+    store = StateStore(FakeService(table))
+    assert store.try_acquire_run_lease(datetime.now(UTC)) is False
+    assert table.update_kwargs["etag"] == 'W/"etag-1"'
+    assert table.update_kwargs["match_condition"] is not None
+
+
+def _lease_store(create_raises: bool):
+    # Stub table exercising the REAL run_lease context manager (2026-08-25).
+    from azure.core.exceptions import ResourceExistsError
+
+    from core.state_store import StateStore
+
+    class Table:
+        def __init__(self):
+            self.deleted = False
+
+        def create_entity(self, entity):
+            if create_raises:
+                raise ResourceExistsError("held")
+
+        def get_entity(self, partition, row):
+            class E(dict):
+                metadata = {"etag": "e1"}
+
+            return E({"at": datetime.now(UTC)})  # fresh → not stale
+
+        def delete_entity(self, partition, row):
+            self.deleted = True
+
+    class Service:
+        def __init__(self, table):
+            self._t = table
+
+        def get_table_client(self, name):
+            return self._t
+
+    table = Table()
+    return StateStore(Service(table)), table
+
+
+def test_run_lease_context_manager_acquires_and_releases():
+    store, table = _lease_store(create_raises=False)
+    with store.run_lease():
+        assert table.deleted is False  # held inside the block
+    assert table.deleted is True  # released on exit
+
+
+def test_run_lease_context_manager_releases_on_body_failure():
+    store, table = _lease_store(create_raises=False)
+    with pytest.raises(RuntimeError, match="boom"), store.run_lease():
+        raise RuntimeError("boom")
+    assert table.deleted is True
+
+
+def test_run_lease_context_manager_busy_raises_without_releasing():
+    # The busy raise happens BEFORE the try: a busy exit must never delete
+    # the ACTIVE holder's lease (Gate 3 M6, now structural).
+    from core.exceptions import RunBusyError
+
+    store, table = _lease_store(create_raises=True)
+    with pytest.raises(RunBusyError):
+        with store.run_lease():
+            raise AssertionError("body must not run")
+    assert table.deleted is False
