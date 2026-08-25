@@ -239,7 +239,9 @@ class StateStore:
             except Exception:
                 # Diagnostics only (Gate 3 M3): a failed history append must not
                 # fail a run whose last-run row landed — same stance as the gauge.
-                logger.warning("heartbeat history append failed — last-run row written")
+                logger.warning(
+                    "heartbeat history append failed — last-run row written", exc_info=True
+                )
 
     def write_trello_config(self, config: TrelloConfig) -> None:
         with self._lock:
@@ -327,7 +329,11 @@ class StateStore:
                 return True
             except ResourceExistsError:
                 existing = table.get_entity(WORKER_STATE_PARTITION, RUN_LEASE_ROW)
-                if (now - existing[RUN_LEASE_AT_PROP]).total_seconds() <= RUN_LEASE_STALE_S:
+                held_since = existing[RUN_LEASE_AT_PROP]
+                if (now - held_since).total_seconds() <= RUN_LEASE_STALE_S:
+                    # The timestamp distinguishes genuine overlap from a dead
+                    # holder's not-yet-stale lease (repeated skipped_busy).
+                    logger.info("run lease held since %s — busy this wake", held_since)
                     return False
                 try:
                     table.update_entity(
@@ -335,6 +341,12 @@ class StateStore:
                         mode=UpdateMode.REPLACE,
                         etag=existing.metadata["etag"],
                         match_condition=MatchConditions.IfNotModified,
+                    )
+                    # The only place a hard-killed run (host kill, no failed
+                    # heartbeat, lease never released) becomes visible.
+                    logger.warning(
+                        "stale run lease taken over — held since %s, holder never released it",
+                        held_since,
                     )
                     return True
                 except (ResourceModifiedError, ResourceNotFoundError):

@@ -25,6 +25,7 @@ from core.secret_store import (
     SecretStore,
     require_secret,
 )
+from pipeline.http_logging import raise_for_status_logged
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class GmailClient:
             # Non-definitive rejection: propagates as failed below, but App
             # Insights needs the OAuth code, not just status+URL (H3).
             logger.warning("token endpoint 4xx with non-definitive error: %s", error_code)
-        response.raise_for_status()
+        raise_for_status_logged(response, logger)
         self._access_token = response.json()["access_token"]
 
     @staticmethod
@@ -185,7 +186,7 @@ class GmailClient:
             params=params,
             headers=self._auth_header(),
         )
-        response.raise_for_status()
+        raise_for_status_logged(response, logger)
         return response.json()
 
     def _post(self, path: str, json: dict) -> dict:
@@ -194,7 +195,7 @@ class GmailClient:
             json=json,
             headers=self._auth_header(),
         )
-        response.raise_for_status()
+        raise_for_status_logged(response, logger)
         return response.json()
 
     def _auth_header(self) -> dict[str, str]:

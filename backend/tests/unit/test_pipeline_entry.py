@@ -26,6 +26,9 @@ from pipeline.claim_data import (
     build_card_name,
 )
 from pipeline.entry import (
+    ACTION_CARD,
+    ACTION_COMMENT,
+    ACTION_DEDUP_SKIP,
     LABEL_FAILED,
     LABEL_PROCESADO,
     RUN_DEADLINE_S,
@@ -625,3 +628,76 @@ def test_fetch_phase_honors_the_deadline():
     counts, _, _, _ = _run([_msg("m1", CLAIM_SUBJECT, 100)], gmail=gmail, deadline_offset=-1.0)
     assert fetched == []
     assert counts.processed == 0
+
+
+# --- diagnosability: understand a failure without reproducing it ---
+
+
+def test_email_failure_log_carries_the_traceback(caplog):
+    # The failed email leaves UNREAD forever — this record is the only
+    # automatic account of WHERE in the sequence it died, not just str(exc).
+    with caplog.at_level(logging.WARNING, logger="pipeline.entry"):
+        _run([_msg("m1", UNPARSEABLE_SUBJECT, 100)])
+    (record,) = [r for r in caplog.records if "email_failed" in r.getMessage()]
+    assert record.exc_info is not None
+
+
+def test_gauge_failure_log_carries_the_cause(caplog):
+    gmail = FakeGmail([_msg("m1", CLAIM_SUBJECT, 100)])
+    gmail.gauge_raises = True
+    with caplog.at_level(logging.WARNING, logger="pipeline.entry"):
+        _run([_msg("m1", CLAIM_SUBJECT, 100)], gmail=gmail)
+    (record,) = [r for r in caplog.records if "gauge unavailable" in r.getMessage()]
+    assert record.exc_info is not None
+
+
+def _processed_lines(caplog):
+    return [r.getMessage() for r in caplog.records if "email_processed" in r.getMessage()]
+
+
+def test_processed_email_logs_ref_and_action(caplog):
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        _run([_msg("m1", CLAIM_SUBJECT, 100)])
+    (line,) = _processed_lines(caplog)
+    assert "ref=2026/417" in line
+    assert f"action={ACTION_CARD}" in line
+
+
+def test_dedup_skip_is_logged_as_such(caplog):
+    # "processed=1 but no card" must be explainable from the logs alone.
+    history = FakeHistory()
+    history.rows["2026/417"] = object()
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        _run([_msg("m1", CLAIM_SUBJECT, 100)], history=history)
+    (line,) = _processed_lines(caplog)
+    assert f"action={ACTION_DEDUP_SKIP}" in line
+
+
+def test_comunicacion_comment_is_logged(caplog):
+    # No ledger row is written for comunicaciones (REQ-8) — this line is the
+    # only durable record outside the Trello comment itself.
+    trello = FakeTrello(existing_card={"id": "card-7", "name": "MADRID 2026/417 X"})
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        _run([_msg("m1", COMUNICACION_SUBJECT, 100)], trello=trello)
+    (line,) = _processed_lines(caplog)
+    assert "ref=2026/417" in line
+    assert f"action={ACTION_COMMENT}" in line
+
+
+def test_run_summary_includes_matched_count(caplog):
+    # matched = listed ids: a silent 100-cap truncation (saturation backlog
+    # item) shows up as matched pinned at the cap while UNREAD keeps growing.
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        _run(
+            [
+                _msg("m1", CLAIM_SUBJECT, 100),
+                _msg("m2", ASISTENCIA_SUBJECT, 200, body="pide SERVICIO BRICO HOGAR"),
+            ]
+        )
+    (summary,) = [
+        r.getMessage()
+        for r in caplog.records
+        if "matched=" in r.getMessage() and "processed=" in r.getMessage()
+    ]
+    assert "matched=2" in summary
+    assert "processed=2" in summary

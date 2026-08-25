@@ -16,7 +16,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from time import monotonic
-from typing import Final, Protocol, runtime_checkable
+from typing import Final, Literal, Protocol, runtime_checkable
 
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient
@@ -50,6 +50,13 @@ UNREAD_LABEL_ID: Final = "UNREAD"  # Gmail system label id
 # Same queryable prefix app.worker uses; duplicated literal because pipeline/
 # must not import app (App Insights: traces | where message startswith this).
 _PIPELINE_LOG_PREFIX: Final = "worker_run pipeline"
+# What _process_one did with an email — the per-email log line's closed set.
+# dedup_skip and comment matter most: neither creates a card, and comunicación
+# writes no ledger row, so the log line is the only durable record.
+ACTION_CARD: Final = "card"
+ACTION_COMMENT: Final = "comment"
+ACTION_DEDUP_SKIP: Final = "dedup_skip"
+ProcessedAction = Literal["card", "comment", "dedup_skip"]
 
 
 def build_claim_query() -> str:
@@ -134,16 +141,19 @@ def process_mailbox(
             )
             break
         try:
-            _process_one(message, trello, membretes, history, extractor)
+            action = _process_one(message, trello, membretes, history, extractor)
         except Exception as exc:
             # Per-email boundary (REQ-2, deviation from the laptop's
             # batch-abort): terminal `failed` label = the operator work queue.
+            # exc_info: the email leaves UNREAD forever — this record must say
+            # WHERE in the sequence it died, not just str(exc).
             logger.warning(
                 "%s email_failed ref=%s id=%s reason=%s",
                 _PIPELINE_LOG_PREFIX,
                 _claim_ref_of(message),
                 message["id"],
                 exc,
+                exc_info=exc,
             )
             gmail.modify_labels(message["id"], [failed_id], [UNREAD_LABEL_ID])
             failed += 1
@@ -153,16 +163,26 @@ def process_mailbox(
         # wake dedup-skips and relabels) — never burn a terminal failed label.
         gmail.modify_labels(message["id"], [procesado_id], [UNREAD_LABEL_ID])
         processed += 1
+        logger.info(
+            "%s email_processed ref=%s id=%s action=%s",
+            _PIPELINE_LOG_PREFIX,
+            _claim_ref_of(message),
+            message["id"],
+            action,
+        )
     try:
         # After processing, so this run's failures appear in the gauge (REQ-5).
         failed_total = gmail.count_messages_with_label(failed_id)
     except Exception:
         # A gauge blip must not fail a run whose mutations completed.
-        logger.warning("%s failed_total gauge unavailable", _PIPELINE_LOG_PREFIX)
+        logger.warning("%s failed_total gauge unavailable", _PIPELINE_LOG_PREFIX, exc_info=True)
         failed_total = None
+    # matched = listed ids: a silent 100-cap truncation (saturation backlog
+    # item) shows up as matched pinned at the cap while UNREAD keeps growing.
     logger.info(
-        "%s processed=%d failed=%d failed_total=%s",
+        "%s matched=%d processed=%d failed=%d failed_total=%s",
         _PIPELINE_LOG_PREFIX,
+        len(message_ids),
         processed,
         failed,
         failed_total,
@@ -183,7 +203,7 @@ def _process_one(
     membretes: MembreteSource,
     history: ClaimLedger,
     extractor,
-) -> None:
+) -> ProcessedAction:
     subject = ClaimData.extract_subject(message) or ""
     if not any(marker in subject for marker in CLAIM_SUBJECT_MARKERS):
         # Gmail's phrase match said yes, the in-code source of truth says no —
@@ -200,11 +220,11 @@ def _process_one(
         if card is None:
             raise ValueError(f"comunicación {claim_ref} has no existing card")
         trello.add_comment(card["id"], build_card_comment(claim))
-        return
+        return ACTION_COMMENT
     if history.get_claim(claim_ref) is not None:
         # Idempotent re-delivery / forward of a processed claim (D12c): skip
         # Trello entirely; the caller relabels and counts it processed.
-        return
+        return ACTION_DEDUP_SKIP
     pdf = generate_pdf_from_email(claim.email_body, claim.type, membretes)
     card_url = trello.create_full_card(
         name=build_card_name(claim),
@@ -226,6 +246,7 @@ def _process_one(
             card_url=card_url,
         )
     )
+    return ACTION_CARD
 
 
 def _build_membrete_source(settings: Settings) -> BlobMembreteSource:

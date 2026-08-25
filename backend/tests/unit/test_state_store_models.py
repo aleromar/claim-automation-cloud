@@ -146,7 +146,7 @@ def test_stale_lease_takeover_is_etag_conditional():
     assert table.update_kwargs["match_condition"] is not None
 
 
-def _lease_store(create_raises: bool):
+def _lease_store(create_raises: bool, held_at: datetime | None = None):
     # Stub table exercising the REAL run_lease context manager (2026-08-25).
     from azure.core.exceptions import ResourceExistsError
 
@@ -164,7 +164,7 @@ def _lease_store(create_raises: bool):
             class E(dict):
                 metadata = {"etag": "e1"}
 
-            return E({"at": datetime.now(UTC)})  # fresh → not stale
+            return E({"at": held_at or datetime.now(UTC)})  # fresh → not stale
 
         def delete_entity(self, partition, row):
             self.deleted = True
@@ -204,3 +204,79 @@ def test_run_lease_context_manager_busy_raises_without_releasing():
         with store.run_lease():
             raise AssertionError("body must not run")
     assert table.deleted is False
+
+
+# --- diagnosability: lease + heartbeat log lines ---
+
+
+def test_busy_lease_logs_the_holders_timestamp(caplog):
+    # Repeated skipped_busy heartbeats must be distinguishable from a dead
+    # holder's not-yet-stale lease: the held-since timestamp is the tell.
+    import logging
+    from datetime import timedelta
+
+    held_at = datetime.now(UTC) - timedelta(seconds=5)  # fresh → busy
+    store, _ = _lease_store(create_raises=True, held_at=held_at)
+    with caplog.at_level(logging.INFO, logger="core.state_store"):
+        assert store.try_acquire_run_lease(datetime.now(UTC)) is False
+    (record,) = [r for r in caplog.records if "run lease held since" in r.getMessage()]
+    assert str(held_at) in record.getMessage()
+
+
+def test_stale_lease_takeover_is_logged(caplog):
+    # The takeover is the only place the system notices a run that died
+    # without releasing (host kill / functionTimeout — no failed heartbeat).
+    import logging
+    from datetime import timedelta
+
+    from azure.core.exceptions import ResourceExistsError
+
+    from core.state_store import RUN_LEASE_STALE_S, StateStore
+
+    stale_at = datetime.now(UTC) - timedelta(seconds=RUN_LEASE_STALE_S + 60)
+
+    class Table:
+        def create_entity(self, entity):
+            raise ResourceExistsError("held")
+
+        def get_entity(self, partition, row):
+            class E(dict):
+                metadata = {"etag": "e1"}
+
+            return E({"at": stale_at})
+
+        def update_entity(self, entity, mode=None, etag=None, match_condition=None):
+            pass  # takeover wins
+
+    class Service:
+        def get_table_client(self, name):
+            return Table()
+
+    store = StateStore(Service())
+    with caplog.at_level(logging.WARNING, logger="core.state_store"):
+        assert store.try_acquire_run_lease(datetime.now(UTC)) is True
+    (record,) = [r for r in caplog.records if "stale run lease" in r.getMessage()]
+    assert str(stale_at) in record.getMessage()
+
+
+def test_failed_history_append_logs_the_cause(caplog):
+    import logging
+
+    from core.state_store import StateStore
+
+    class Table:
+        def upsert_entity(self, entity, mode=None):
+            pass  # the last-run row lands
+
+        def create_entity(self, entity):
+            raise RuntimeError("table offline")
+
+    class Service:
+        def get_table_client(self, name):
+            return Table()
+
+    store = StateStore(Service())
+    with caplog.at_level(logging.WARNING, logger="core.state_store"):
+        store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN))
+    (record,) = [r for r in caplog.records if "history append" in r.getMessage()]
+    assert record.exc_info is not None
