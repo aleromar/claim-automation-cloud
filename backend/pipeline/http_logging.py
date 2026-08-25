@@ -5,7 +5,9 @@ response body — the part that says WHY (Trello: "invalid value for desc";
 Gmail: its structured error JSON). Failed emails get a terminal `failed` label,
 so the log must suffice without reproducing. Safe to log here: both clients
 authenticate via headers, never query params, so URLs and bodies carry no
-secrets.
+secrets. One exception to keep it that way: the Gmail token endpoint carries
+the refresh token + client secret in the REQUEST body — never extend this
+helper to log request payloads.
 """
 
 import logging

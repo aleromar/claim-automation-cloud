@@ -146,7 +146,7 @@ def test_stale_lease_takeover_is_etag_conditional():
     assert table.update_kwargs["match_condition"] is not None
 
 
-def _lease_store(create_raises: bool):
+def _lease_store(create_raises: bool, held_at: datetime | None = None):
     # Stub table exercising the REAL run_lease context manager (2026-08-25).
     from azure.core.exceptions import ResourceExistsError
 
@@ -164,7 +164,7 @@ def _lease_store(create_raises: bool):
             class E(dict):
                 metadata = {"etag": "e1"}
 
-            return E({"at": datetime.now(UTC)})  # fresh → not stale
+            return E({"at": held_at or datetime.now(UTC)})  # fresh → not stale
 
         def delete_entity(self, partition, row):
             self.deleted = True
@@ -213,11 +213,14 @@ def test_busy_lease_logs_the_holders_timestamp(caplog):
     # Repeated skipped_busy heartbeats must be distinguishable from a dead
     # holder's not-yet-stale lease: the held-since timestamp is the tell.
     import logging
+    from datetime import timedelta
 
-    store, _ = _lease_store(create_raises=True)
+    held_at = datetime.now(UTC) - timedelta(seconds=5)  # fresh → busy
+    store, _ = _lease_store(create_raises=True, held_at=held_at)
     with caplog.at_level(logging.INFO, logger="core.state_store"):
         assert store.try_acquire_run_lease(datetime.now(UTC)) is False
-    assert any("run lease held since" in r.getMessage() for r in caplog.records)
+    (record,) = [r for r in caplog.records if "run lease held since" in r.getMessage()]
+    assert str(held_at) in record.getMessage()
 
 
 def test_stale_lease_takeover_is_logged(caplog):
