@@ -444,3 +444,20 @@ def test_count_messages_with_label_caps_at_101_when_more_pages(gmail):
     )
     gmail.preflight()
     assert gmail.count_messages_with_label("Label_9") == 101
+
+
+# --- diagnosability: error bodies in the log ---
+
+
+@respx.mock
+def test_api_error_response_body_is_logged(gmail, caplog):
+    # Gmail's structured error JSON says WHY a call failed; httpx's exception
+    # message alone carries only status + URL.
+    _mint_ok()
+    respx.get(LIST_URL).mock(
+        return_value=Response(400, json={"error": {"code": 400, "message": "Invalid label: nope"}})
+    )
+    gmail.preflight()
+    with caplog.at_level(logging.WARNING), pytest.raises(httpx.HTTPStatusError):
+        gmail.list_unread_message_ids()
+    assert any("Invalid label: nope" in r.getMessage() for r in caplog.records)

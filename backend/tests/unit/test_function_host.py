@@ -19,6 +19,11 @@ def test_host_json_declares_v2_and_adaptive_sampling() -> None:
     assert config["version"] == "2.0"
     sampling = config["logging"]["applicationInsights"]["samplingSettings"]
     assert sampling["isEnabled"] is True
+    # Traces/exceptions stay unsampled: at ~50 runs/day the volume ceiling
+    # sampling protects against doesn't exist, and a failure burst is exactly
+    # when every line matters. Dependencies remain sampled (the noisy type).
+    excluded = set(sampling["excludedTypes"].split(";"))
+    assert {"Request", "Exception", "Trace"} <= excluded
 
 
 def test_host_json_empties_route_prefix() -> None:

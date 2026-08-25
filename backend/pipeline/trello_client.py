@@ -18,6 +18,7 @@ from core.config import Settings
 from core.exceptions import NoAccessError
 from core.secret_store import TRELLO_API_KEY, TRELLO_TOKEN, SecretStore
 from core.state_store import TrelloConfig
+from pipeline.http_logging import raise_for_status_logged
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class TrelloClient:
         if response.status_code == 401:
             logger.warning("trello rejected the token")
             raise TrelloNoAccessError(TOKEN_REJECTED)
-        response.raise_for_status()
+        raise_for_status_logged(response, logger)
 
     def create_full_card(
         self, *, name: str, description: str, pdf_bytes: bytes, pdf_filename: str, comment: str
@@ -119,7 +120,7 @@ class TrelloClient:
             except Exception:
                 # The leftover card is the narrowed REQ-4 residual; the original
                 # failure must surface, not the delete's.
-                logger.warning("compensating delete failed for card %s", card["id"])
+                logger.warning("compensating delete failed for card %s", card["id"], exc_info=True)
             raise
         return short_url
 
@@ -179,5 +180,5 @@ class TrelloClient:
 
     @staticmethod
     def _checked(response: httpx.Response) -> httpx.Response:
-        response.raise_for_status()
+        raise_for_status_logged(response, logger)
         return response

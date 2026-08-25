@@ -327,3 +327,46 @@ def test_find_card_requires_a_ref_boundary(trello):
     assert trello.find_card_by_claim_ref("2026/41") is None
     card = trello.find_card_by_claim_ref("2026/417")
     assert card is not None and card["id"] == "card-417"
+
+
+# --- diagnosability: error bodies + compensation causes in the log ---
+
+
+@respx.mock
+def test_api_error_response_body_is_logged(trello, caplog):
+    # httpx's HTTPStatusError message drops the body — the part that says WHY
+    # Trello refused (the email gets a terminal failed label; no reproducing).
+    import logging
+
+    respx.post(f"{API_BASE}/1/cards").mock(
+        return_value=Response(400, text="invalid value for desc")
+    )
+    _me_ok()
+    trello.preflight()
+    with caplog.at_level(logging.WARNING), pytest.raises(httpx.HTTPStatusError):
+        trello.create_full_card(
+            name="n", description="d", pdf_bytes=b"x", pdf_filename="f.pdf", comment="c"
+        )
+    assert any("invalid value for desc" in r.getMessage() for r in caplog.records)
+
+
+@respx.mock
+def test_failed_compensating_delete_logs_the_cause(trello, caplog):
+    # The leftover partial card is a real board artifact — its log line must
+    # say why the cleanup failed, not just that it did.
+    import logging
+
+    respx.post(f"{API_BASE}/1/cards").mock(
+        return_value=Response(200, json={"id": "card-1", "shortUrl": "u"})
+    )
+    respx.post(f"{API_BASE}/1/cards/card-1/attachments").mock(return_value=Response(200, json={}))
+    respx.post(f"{API_BASE}/1/cards/card-1/actions/comments").mock(return_value=Response(500))
+    respx.delete(f"{API_BASE}/1/cards/card-1").mock(return_value=Response(503))
+    _me_ok()
+    trello.preflight()
+    with caplog.at_level(logging.WARNING), pytest.raises(httpx.HTTPStatusError):
+        trello.create_full_card(
+            name="n", description="d", pdf_bytes=b"x", pdf_filename="f.pdf", comment="c"
+        )
+    (record,) = [r for r in caplog.records if "compensating delete" in r.getMessage()]
+    assert record.exc_info is not None
