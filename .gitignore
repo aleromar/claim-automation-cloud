@@ -13,7 +13,7 @@ dist/
 # Frontend build / test output
 frontend/coverage/
 
-# Deploy-time version stamp (written by deploy-functions.yml; never committed)
+# Deploy-time version stamp (written by deploy.yml's deploy-functions job; never committed)
 backend/app/build_version.txt
 
 # Playwright
@@ -26,6 +26,7 @@ e2e/blob-report/
 local.settings.json
 .secrets.json
 e2e/.tmp/
+e2e/.env.live
 
 # OS / editor
 .DS_Store

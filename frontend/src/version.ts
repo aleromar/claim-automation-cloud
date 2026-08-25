@@ -1,5 +1,5 @@
 // Build version of this frontend bundle (version-display REQ-3.5).
-// deploy-swa.yml stamps VITE_BUILD_VERSION=$GITHUB_SHA at build time (same
+// deploy.yml's deploy-swa job stamps VITE_BUILD_VERSION=$GITHUB_SHA at build time (same
 // pattern as VITE_API_BASE_URL); local/CI builds carry no stamp -> DEV_VERSION.
 
 export const DEV_VERSION = "dev";

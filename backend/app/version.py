@@ -1,6 +1,6 @@
 """Build version of the running backend (version-display REQ-1).
 
-deploy-functions.yml stamps the git SHA into build_version.txt inside the
+deploy.yml's deploy-functions job stamps the git SHA into build_version.txt inside the
 deploy artifact — the workflow is the only place that knows the SHA (no
 version file is ever committed). Everywhere else (local dev, CI, e2e) the
 file is absent and the reader falls back to DEV_VERSION.
