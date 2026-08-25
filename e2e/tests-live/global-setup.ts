@@ -20,9 +20,10 @@ export default async function globalSetup(): Promise<void> {
     "UseDevelopmentStorage=true",
   ).getContainerClient("membretes");
   await container.createIfNotExists();
-  await container
-    .getBlockBlobClient("normal.png")
-    .uploadData(SYNTHETIC_PNG, {
+  // The full MEMBRETE_BY_TYPE set (pdf_gen.py): declaración, urgente, asistencia.
+  for (const name of ["normal.png", "urgente.png", "asistencia.png"]) {
+    await container.getBlockBlobClient(name).uploadData(SYNTHETIC_PNG, {
       blobHTTPHeaders: { blobContentType: "image/png" },
     });
+  }
 }

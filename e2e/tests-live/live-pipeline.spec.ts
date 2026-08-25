@@ -9,10 +9,13 @@ import { GmailLive } from "./helpers/gmail";
 import { injectSession, mintSessionJwt } from "./helpers/session";
 import { TrelloLive } from "./helpers/trello";
 
-// Live smoke (live-e2e REQ-1/2): one declaración email through the REAL
-// pipeline — real Gmail, real Trello, local stack. Lifecycle:
-// sweep → mint ref (per attempt) → seed → poll searchable → settings →
-// worker ON (UI) → Process now → assert UI + Trello + Gmail → teardown.
+// Live smoke (live-e2e REQ-1/2): ALL SIX claim types through the REAL pipeline
+// in one batch run — real Gmail, real Trello, local stack. Lifecycle:
+// sweep → mint refs (per attempt) → seed 6 → poll searchable → settings →
+// worker ON (UI) → Process now → assert UI + per-type Trello + Gmail → teardown.
+// The comunicación email reuses the declaración's ref and is seeded LAST:
+// internalDate ordering guarantees the card exists when its comment arrives
+// (find_card_by_claim_ref scans board lists directly — no search-index lag).
 
 // The canonical full-field parseable body (test_claim_parsing.py) — PLAIN_BODY
 // lacks Localidad: and would crash build_card_name via town=None.
@@ -23,19 +26,26 @@ const ASITUR_BODY = readFileSync(
   "utf8",
 );
 
+// Asistencia subtypes are classified by BODY markers (claim_data.from_subject);
+// inject the marker into the parseable body, inside <body> when present.
+const withMarker = (marker: string): string =>
+  ASITUR_BODY.includes("</body>")
+    ? ASITUR_BODY.replace("</body>", `<p>pide ${marker}</p></body>`)
+    : `${ASITUR_BODY}<p>pide ${marker}</p>`;
+
 const gmail = new GmailLive();
 const trello = new TrelloLive();
 
-// Teardown state — set as the test progresses so afterEach can clean up
+// Teardown state — appended as the test progresses so afterEach can clean up
 // whatever exists at the point of failure.
-let claimRef: string | null = null;
-let seededMessageId: string | null = null;
+let claimRefs: string[] = [];
+let seededMessageIds: string[] = [];
 let jwt: string | null = null;
 
 test.afterEach(async () => {
   // The hook gets its own budget: a test that burned its full timeout must not
-  // starve cleanup (Gate 3 #6 — leftover email + worker ON poison the next run).
-  test.setTimeout(60_000);
+  // starve cleanup (Gate 3 #6 — leftover emails + worker ON poison the next run).
+  test.setTimeout(120_000);
   // Best-effort, every step attempted; failures aggregate so a broken teardown
   // is visible instead of silently poisoning the next run.
   const failures: string[] = [];
@@ -48,20 +58,20 @@ test.afterEach(async () => {
       failures.push(`worker OFF: ${String(error)}`);
     }
   }
-  if (seededMessageId) {
+  for (const id of seededMessageIds) {
     try {
-      await gmail.trash(seededMessageId);
+      await gmail.trash(id);
     } catch (error) {
-      failures.push(`trash email: ${String(error)}`);
+      failures.push(`trash email ${id}: ${String(error)}`);
     }
   }
-  if (claimRef) {
+  for (const ref of claimRefs) {
     try {
-      for (const card of await trello.openCardsWithRef(claimRef)) {
+      for (const card of await trello.openCardsWithRef(ref)) {
         await trello.archiveCard(card.id);
       }
     } catch (error) {
-      failures.push(`archive card: ${String(error)}`);
+      failures.push(`archive cards for ${ref}: ${String(error)}`);
     }
   }
   if (failures.length > 0) {
@@ -69,31 +79,91 @@ test.afterEach(async () => {
   }
 });
 
-test("a seeded claim email becomes a Trello card through the real pipeline", async ({
+test("all six claim types flow through the real pipeline in one run", async ({
   page,
 }) => {
   // Reset per attempt: a retry must not inherit attempt 1's teardown state.
-  claimRef = null;
-  seededMessageId = null;
+  claimRefs = [];
+  seededMessageIds = [];
   // JWT first — it needs no live call, and teardown's worker-OFF depends on it.
   jwt = mintSessionJwt();
 
   // Sweep (REQ-2.1): a crashed prior run's UNREAD residue would be processed
-  // alongside our email and break the exact-count assertion.
+  // alongside our emails and break the exact-count assertion.
   await gmail.sweepUnreadClaimEmails();
 
-  // Ref minted INSIDE the test body (REQ-2.3): a Playwright retry must get a
-  // fresh ref, or it dedup-skips against attempt 1's ledger row.
+  // Refs minted INSIDE the test body (REQ-2.3): a Playwright retry must get
+  // fresh refs, or it dedup-skips against attempt 1's ledger rows.
   const year = String(new Date().getFullYear());
-  const num = String(Math.floor(Date.now() / 1000));
-  claimRef = `${year}/${num}`;
+  const base = Math.floor(Date.now() / 1000);
+  const ref = (offset: number): string => {
+    const r = `${year}/${base + offset}`;
+    claimRefs.push(r);
+    return r;
+  };
+  const observaciones = `seguimiento live-e2e ${base}`;
 
-  seededMessageId = await gmail.insertClaimEmail(
-    `AVISO: Declaración de siniestro a colaborador ${claimRef}`,
-    ASITUR_BODY,
-  );
+  // One email per type; card-creating types get distinct refs, the comunicación
+  // reuses the declaración's (it comments on that card, creates nothing).
+  // Expected comments pin the build_card_comment taxonomy — including that
+  // ELECTRICIDAD deliberately falls through to the default "Parte nuevo".
+  const declaracionRef = ref(0);
+  const seeds: {
+    subject: string;
+    body: string;
+    cardRef: string | null; // null = no card of its own (comunicación)
+    comment: RegExp;
+  }[] = [
+    {
+      subject: `AVISO: Declaración de siniestro a colaborador ${declaracionRef}`,
+      body: ASITUR_BODY,
+      cardRef: declaracionRef,
+      comment: /^@board Parte nuevo en /,
+    },
+    {
+      // URGENTE rides AFTER the intact marker phrase (classification fixture
+      // format) — "de siniestro urgente a" would match neither the Gmail
+      // phrase query nor from_subject's marker check.
+      subject: `AVISO: Declaración de siniestro a colaborador ${ref(1)} URGENTE`,
+      body: ASITUR_BODY,
+      cardRef: claimRefs[1],
+      comment: /^@board Parte URGENTE en /,
+    },
+    {
+      subject: `Solicitud de asistencia a colaborador ${ref(2)}`,
+      body: withMarker("SERVICIO BRICO HOGAR"),
+      cardRef: claimRefs[2],
+      comment: /^@board Nueva brico asistencia en /,
+    },
+    {
+      subject: `Solicitud de asistencia a colaborador ${ref(3)}`,
+      body: withMarker("ENVÍO DE PROFESIONALES"),
+      cardRef: claimRefs[3],
+      comment: /^@board Nuevo envío de profesionales en /,
+    },
+    {
+      subject: `Solicitud de asistencia a colaborador ${ref(4)}`,
+      body: withMarker("ELECTRICIDAD DE EMERGENCIA"),
+      cardRef: claimRefs[4],
+      comment: /^@board Parte nuevo en /,
+    },
+    {
+      // Seeded LAST: must process after the declaración created its card.
+      // Full <html> document: the pipeline's HTML→plain conversion triggers on
+      // document-shaped bodies only — a bare <p> fragment leaks its tags into
+      // the extracted observaciones (found live: "…</p>" in the comment).
+      subject: `Comunicación a colaborador ${declaracionRef}`,
+      body: `<html><body><p>Observaciones: ${observaciones}</p></body></html>`,
+      cardRef: null,
+      comment: new RegExp(`^@board ${observaciones}$`),
+    },
+  ];
+
+  for (const seed of seeds) {
+    seededMessageIds.push(await gmail.insertClaimEmail(seed.subject, seed.body));
+  }
   // Gmail's q-search index lags inserts; the pipeline lists via q (REQ-1.1).
-  await gmail.waitUntilSearchable(seededMessageId);
+  await gmail.waitUntilSearchable(seededMessageIds);
 
   await seedTrelloSettings(jwt);
   await injectSession(page, jwt);
@@ -118,25 +188,39 @@ test("a seeded claim email becomes a Trello card through the real pipeline", asy
   await expect(page.getByText(/run result:/i)).toHaveText(/run result: ran/i, {
     timeout: 5_000,
   });
-  await expect(page.getByText(/last run:/i)).toContainText(/1 processed, 0 failed/);
+  await expect(page.getByText(/last run:/i)).toContainText(/6 processed, 0 failed/);
 
-  // Trello (REQ-1.2), ref-scoped: exactly our card, on the configured list,
-  // carrying the PDF.
-  const cards = await trello.openCardsWithRef(claimRef);
-  expect(cards).toHaveLength(1);
-  expect(cards[0].idList).toBe(requireLiveEnv().TRELLO_LIST_ID);
-  const attachments = await trello.attachmentNames(cards[0].id);
-  expect(attachments).toContain(`claim_${num}_${year}.pdf`);
-  // The @board comment is what notifies the members — a card without it is
-  // silent. Content taxonomy is unit-tested; here we prove it reached Trello.
-  const comments = await trello.cardComments(cards[0].id);
-  expect(comments.some((c) => /^@board Parte nuevo en /.test(c))).toBe(true);
+  // Trello (REQ-1.2), ref-scoped per type: exactly one card each, on the
+  // configured list, carrying its PDF and its @board notification comment.
+  for (const seed of seeds.filter((s) => s.cardRef !== null)) {
+    const cards = await trello.openCardsWithRef(seed.cardRef as string);
+    expect(cards, seed.subject).toHaveLength(1);
+    expect(cards[0].idList, seed.subject).toBe(requireLiveEnv().TRELLO_LIST_ID);
+    const num = (seed.cardRef as string).split("/")[1];
+    const attachments = await trello.attachmentNames(cards[0].id);
+    expect(attachments, seed.subject).toContain(`claim_${num}_${year}.pdf`);
+    const comments = await trello.cardComments(cards[0].id);
+    expect(
+      comments.some((c) => seed.comment.test(c)),
+      `${seed.subject}: expected a comment matching ${seed.comment}`,
+    ).toBe(true);
+  }
 
-  // Gmail (REQ-1.3): UNREAD gone, procesado present (created lowercase on a
-  // fresh mailbox; lookup is case-insensitive — assert likewise).
-  const labels = (await gmail.labelNames(seededMessageId)).map((name) =>
-    name.toLowerCase(),
-  );
-  expect(labels).not.toContain("unread");
-  expect(labels).toContain("procesado");
+  // REQ-8 chaining: the comunicación's observaciones landed as a SECOND
+  // comment on the declaración's card — and created no card of its own
+  // (the ref-scoped toHaveLength(1) above already pinned that).
+  const declaracionCard = (await trello.openCardsWithRef(declaracionRef))[0];
+  const declaracionComments = await trello.cardComments(declaracionCard.id);
+  expect(
+    declaracionComments.some((c) => c === `@board ${observaciones}`),
+    "comunicación comment missing on the declaración card",
+  ).toBe(true);
+
+  // Gmail (REQ-1.3), every seeded message: UNREAD gone, procesado present
+  // (created lowercase on a fresh mailbox; lookup is case-insensitive).
+  for (const id of seededMessageIds) {
+    const labels = (await gmail.labelNames(id)).map((name) => name.toLowerCase());
+    expect(labels, id).not.toContain("unread");
+    expect(labels, id).toContain("procesado");
+  }
 });

@@ -107,14 +107,17 @@ export class GmailLive {
   }
 
   /** Gmail's q-search index lags inserts; the pipeline lists via q, so wait
-   * until the seeded message is actually searchable before Process now. */
-  async waitUntilSearchable(messageId: string, budgetMs = 60_000): Promise<void> {
+   * until every seeded message is actually searchable before Process now. */
+  async waitUntilSearchable(messageIds: string[], budgetMs = 90_000): Promise<void> {
     const deadline = Date.now() + budgetMs;
     while (Date.now() < deadline) {
-      if ((await this.listUnreadClaimIds()).includes(messageId)) return;
+      const visible = new Set(await this.listUnreadClaimIds());
+      if (messageIds.every((id) => visible.has(id))) return;
       await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
-    throw new Error(`gmail: seeded message not searchable after ${budgetMs}ms`);
+    throw new Error(
+      `gmail: ${messageIds.length} seeded messages not all searchable after ${budgetMs}ms`,
+    );
   }
 
   async labelNames(messageId: string): Promise<string[]> {
