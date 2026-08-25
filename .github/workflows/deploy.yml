@@ -67,6 +67,7 @@ jobs:
     # deliberately has no `environment:`, so environment-scoped secrets would
     # resolve empty here. Keep the live credentials at repo scope.
     env:
+      GMAIL_ACCOUNT: ${{ secrets.GMAIL_ACCOUNT }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
