@@ -43,6 +43,15 @@ export class TrelloLive {
     return cards.filter((card) => card.name.includes(claimRef));
   }
 
+  async cardComments(cardId: string): Promise<string[]> {
+    const actions = (await this.call(
+      "GET",
+      `/cards/${cardId}/actions?filter=commentCard`,
+      "read card comments",
+    )) as { data: { text: string } }[];
+    return actions.map((a) => a.data.text);
+  }
+
   async attachmentNames(cardId: string): Promise<string[]> {
     const attachments = (await this.call(
       "GET",

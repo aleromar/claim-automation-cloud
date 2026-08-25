@@ -127,6 +127,10 @@ test("a seeded claim email becomes a Trello card through the real pipeline", asy
   expect(cards[0].idList).toBe(requireLiveEnv().TRELLO_LIST_ID);
   const attachments = await trello.attachmentNames(cards[0].id);
   expect(attachments).toContain(`claim_${num}_${year}.pdf`);
+  // The @board comment is what notifies the members — a card without it is
+  // silent. Content taxonomy is unit-tested; here we prove it reached Trello.
+  const comments = await trello.cardComments(cards[0].id);
+  expect(comments.some((c) => /^@board Parte nuevo en /.test(c))).toBe(true);
 
   // Gmail (REQ-1.3): UNREAD gone, procesado present (created lowercase on a
   // fresh mailbox; lookup is case-insensitive — assert likewise).
