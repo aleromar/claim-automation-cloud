@@ -11,6 +11,9 @@ would block the Functions host's single event loop.
 
 import logging
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from enum import StrEnum
 from functools import lru_cache
 from time import time_ns
@@ -32,6 +35,7 @@ from azure.identity import DefaultAzureCredential
 from pydantic import AwareDatetime, BaseModel, Field
 
 from core.config import Settings, get_settings
+from core.exceptions import RunBusyError
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +348,20 @@ class StateStore:
                 self._table(WORKER_STATE_TABLE).delete_entity(WORKER_STATE_PARTITION, RUN_LEASE_ROW)
             except ResourceNotFoundError:
                 pass
+
+    @contextmanager
+    def run_lease(self) -> Iterator[None]:
+        """The lease as a context manager (operator, 2026-08-25): the busy
+        raise happens BEFORE the try, so a busy exit can never release the
+        active holder's lease, and the pairing is structurally unforgettable
+        (the Gate 3 M6 bug class). Non-blocking acquire — no deadlock is
+        possible: nothing ever waits while holding the lease."""
+        if not self.try_acquire_run_lease(datetime.now(UTC)):
+            raise RunBusyError("run lease held — another invocation is in flight")
+        try:
+            yield
+        finally:
+            self.release_run_lease()
 
 
 def state_store_from_settings(settings: Settings) -> StateStore:

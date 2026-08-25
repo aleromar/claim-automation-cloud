@@ -144,3 +144,63 @@ def test_stale_lease_takeover_is_etag_conditional():
     assert store.try_acquire_run_lease(datetime.now(UTC)) is False
     assert table.update_kwargs["etag"] == 'W/"etag-1"'
     assert table.update_kwargs["match_condition"] is not None
+
+
+def _lease_store(create_raises: bool):
+    # Stub table exercising the REAL run_lease context manager (2026-08-25).
+    from azure.core.exceptions import ResourceExistsError
+
+    from core.state_store import StateStore
+
+    class Table:
+        def __init__(self):
+            self.deleted = False
+
+        def create_entity(self, entity):
+            if create_raises:
+                raise ResourceExistsError("held")
+
+        def get_entity(self, partition, row):
+            class E(dict):
+                metadata = {"etag": "e1"}
+
+            return E({"at": datetime.now(UTC)})  # fresh → not stale
+
+        def delete_entity(self, partition, row):
+            self.deleted = True
+
+    class Service:
+        def __init__(self, table):
+            self._t = table
+
+        def get_table_client(self, name):
+            return self._t
+
+    table = Table()
+    return StateStore(Service(table)), table
+
+
+def test_run_lease_context_manager_acquires_and_releases():
+    store, table = _lease_store(create_raises=False)
+    with store.run_lease():
+        assert table.deleted is False  # held inside the block
+    assert table.deleted is True  # released on exit
+
+
+def test_run_lease_context_manager_releases_on_body_failure():
+    store, table = _lease_store(create_raises=False)
+    with pytest.raises(RuntimeError, match="boom"), store.run_lease():
+        raise RuntimeError("boom")
+    assert table.deleted is True
+
+
+def test_run_lease_context_manager_busy_raises_without_releasing():
+    # The busy raise happens BEFORE the try: a busy exit must never delete
+    # the ACTIVE holder's lease (Gate 3 M6, now structural).
+    from core.exceptions import RunBusyError
+
+    store, table = _lease_store(create_raises=True)
+    with pytest.raises(RunBusyError):
+        with store.run_lease():
+            raise AssertionError("body must not run")
+    assert table.deleted is False

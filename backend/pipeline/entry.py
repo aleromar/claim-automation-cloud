@@ -22,7 +22,6 @@ from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient
 
 from core.config import Settings, get_settings
-from core.exceptions import RunBusyError
 from core.secret_store import get_store
 from core.state_store import ClaimRecord, RunCounts, get_state_store
 from pipeline.claim_data import (
@@ -252,9 +251,7 @@ def run_pipeline() -> RunCounts:
     every exit."""
     settings = get_settings()
     store = get_state_store()
-    if not store.try_acquire_run_lease(datetime.now(UTC)):
-        raise RunBusyError("run lease held — another invocation is in flight")
-    try:
+    with store.run_lease():
         secrets = get_store()
         gmail = GmailClient(settings, secrets)
         trello = TrelloClient(settings, secrets, store.read_trello_config())
@@ -273,5 +270,3 @@ def run_pipeline() -> RunCounts:
                 gmail.close()
             finally:
                 trello.close()
-    finally:
-        store.release_run_lease()

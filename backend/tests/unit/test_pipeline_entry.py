@@ -10,6 +10,7 @@ import base64
 import io
 import logging
 import re
+from contextlib import contextmanager
 
 import pytest
 from PIL import Image as PILImage
@@ -475,17 +476,25 @@ class SeamTrello(SeamClient):
 
 
 class SeamStore:
+    """Mirrors StateStore.run_lease's contract (the real CM has its own
+    stub-table tests in test_state_store_models)."""
+
     def __init__(self, lease_free: bool = True) -> None:
         self.lease_free = lease_free
         self.lease_calls = 0
         self.released = False
 
-    def try_acquire_run_lease(self, now) -> bool:
-        self.lease_calls += 1
-        return self.lease_free
+    @contextmanager
+    def run_lease(self):
+        from core.exceptions import RunBusyError
 
-    def release_run_lease(self) -> None:
-        self.released = True
+        self.lease_calls += 1
+        if not self.lease_free:
+            raise RunBusyError("lease held")
+        try:
+            yield
+        finally:
+            self.released = True
 
     def read_trello_config(self):
         return None  # SeamTrello ignores it
