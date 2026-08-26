@@ -170,7 +170,9 @@ test("all six claim types flow through the real pipeline in one run", async ({
   await page.goto("/");
   await expect(page.getByText(requireLiveEnv().GMAIL_ACCOUNT)).toBeVisible();
 
-  const workerSwitch = page.getByRole("switch", { name: /worker enabled/i });
+  // Spanish UI (frontend-spanish): literals duplicated on purpose, same
+  // language-contract stance as the PR suite.
+  const workerSwitch = page.getByRole("switch", { name: /proceso activado/i });
   await expect(workerSwitch).toBeVisible();
   if (!(await workerSwitch.isChecked())) {
     await workerSwitch.click();
@@ -181,14 +183,16 @@ test("all six claim types flow through the real pipeline in one run", async ({
   // A pipeline failure 500s the request and the outcome span never renders —
   // wait for EITHER the outcome or the failure alert, so a broken run fails in
   // seconds with a reason instead of a 200s blind poll (Gate 3 #2).
-  await page.getByRole("button", { name: /process now/i }).click();
+  await page.getByRole("button", { name: /procesar ahora/i }).click();
   await expect(
-    page.getByText(/run result:/i).or(page.getByRole("alert")),
+    page.getByText(/resultado:/i).or(page.getByRole("alert")),
   ).toBeVisible({ timeout: 200_000 });
-  await expect(page.getByText(/run result:/i)).toHaveText(/run result: ran/i, {
+  await expect(page.getByText(/resultado:/i)).toHaveText(/resultado: completado/i, {
     timeout: 5_000,
   });
-  await expect(page.getByText(/last run:/i)).toContainText(/6 processed, 0 failed/);
+  await expect(page.getByText(/última ejecución:/i)).toContainText(
+    /6 procesados, 0 fallidos/,
+  );
 
   // Trello (REQ-1.2), ref-scoped per type: exactly one card each, on the
   // configured list, carrying its PDF and its @board notification comment.
