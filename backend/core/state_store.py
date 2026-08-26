@@ -377,7 +377,7 @@ class StateStore:
         with self._lock:
             entities = list(
                 self._table(HEARTBEAT_TABLE).query_entities(
-                    "PartitionKey eq @partition and failed gt @zero",
+                    f"PartitionKey eq @partition and {HEARTBEAT_FAILED_PROP} gt @zero",
                     parameters={"partition": HEARTBEAT_HISTORY_PARTITION, "zero": 0},
                 )
             )

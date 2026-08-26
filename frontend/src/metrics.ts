@@ -119,18 +119,29 @@ export function claimsInWindow<T extends Dated>(
   return items.filter((item) => new Date(item.at) >= start);
 }
 
+export const earliestAt = (items: Dated[]): Date | undefined =>
+  items.length
+    ? new Date(Math.min(...items.map((item) => new Date(item.at).getTime())))
+    : undefined;
+
 export function buildBuckets<T extends Dated>(
   items: T[],
   window: Window,
   granularity: Granularity,
   now: Date,
   weightOf: (item: T) => number = () => 1,
+  // Multi-series charts MUST pass one shared earliest (PR #23 review): the
+  // "all" window otherwise starts each series at its own first item and the
+  // chart's index-aligned buckets land in the wrong time bands.
+  earliest: Date | undefined = undefined,
 ): Bucket[] {
   const dates = items.map((item) => new Date(item.at));
-  const earliest = dates.length
-    ? new Date(Math.min(...dates.map((d) => d.getTime())))
-    : undefined;
-  const start = windowStart(window, granularity, now, earliest);
+  const start = windowStart(
+    window,
+    granularity,
+    now,
+    earliest ?? earliestAt(items),
+  );
   // Insertion order = chronological order; zero-fill first, then weigh.
   const counts = new Map<string, number>();
   for (

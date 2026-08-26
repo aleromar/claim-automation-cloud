@@ -153,6 +153,25 @@ describe("buildBuckets", () => {
     ]);
   });
 
+  it("'all' honors an explicit shared earliest over the items' own (PR review fix)", () => {
+    // Two series must share ONE timeline: without the override, each series
+    // would start at its own earliest and the chart indexes would misalign.
+    const buckets = buildBuckets(
+      [claim("2026-08-20T08:00:00Z")],
+      "all",
+      "month",
+      NOW,
+      () => 1,
+      new Date(2026, 5, 10),
+    );
+    expect(buckets.map((b) => b.key)).toEqual([
+      "2026-06",
+      "2026-07",
+      "2026-08",
+    ]);
+    expect(buckets.map((b) => b.count)).toEqual([0, 0, 1]);
+  });
+
   it("'all' spans months from the earliest item to now", () => {
     const buckets = buildBuckets(
       [claim("2026-06-10T08:00:00Z"), claim("2026-08-20T08:00:00Z")],

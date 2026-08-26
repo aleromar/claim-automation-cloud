@@ -210,6 +210,32 @@ describe("MetricsPanel window + list (REQ-3/4)", () => {
     ).toBeVisible();
   });
 
+  it("'Todo' aligns both series to one shared timeline (PR #23 review fix)", async () => {
+    // Claims start in June, errors in August: unaligned per-series bucketing
+    // would render the August error under the June bucket key.
+    mockMetrics({
+      emails_processed: 1,
+      cards_created: 1,
+      emails_failed: 2,
+      failed_runs: 0,
+      error_runs: [{ at: "2026-08-20T08:00:00+00:00", failed: 2 }],
+      claims: [{ ...oldClaim, at: "2026-06-10T08:00:00+00:00" }],
+    });
+    const { container } = render(<MetricsPanel />);
+    // The June claim is outside the default 30d window — anchor on the panel
+    // being loaded, then widen.
+    const windowSelect = await screen.findByRole("combobox", {
+      name: /periodo/i,
+    });
+    fireEvent.change(windowSelect, { target: { value: "all" } });
+    await screen.findByRole("link", { name: oldClaim.claim_ref });
+    const titles = [...container.querySelectorAll("title")].map(
+      (t) => t.textContent,
+    );
+    expect(titles).toContain("2026-06 — Siniestros: 1, Errores: 0");
+    expect(titles).toContain("2026-08 — Siniestros: 0, Errores: 2");
+  });
+
   it("renders the two-series chart for the selected window", async () => {
     mockMetrics();
     render(<MetricsPanel />);

@@ -5,6 +5,7 @@ import { authFetch } from "./auth";
 import ClaimsChart from "./ClaimsChart";
 import {
   buildBuckets,
+  earliestAt,
   claimsInWindow,
   defaultGranularity,
   GRANULARITY_MATRIX,
@@ -178,6 +179,9 @@ export default function MetricsPanel() {
   const { metrics } = panel;
   const now = new Date();
   const claims = claimsInWindow(metrics.claims, window_, granularity, now);
+  // One timeline for BOTH chart series (PR #23 review fix): the shared
+  // earliest keeps the "Todo" window's bucket arrays index-aligned.
+  const sharedEarliest = earliestAt([...metrics.claims, ...metrics.error_runs]);
   return (
     <article>
       <h2>{METRICS_TITLE}</h2>
@@ -238,7 +242,14 @@ export default function MetricsPanel() {
           {
             name: SERIES_CLAIMS,
             color: CLAIMS_COLOR,
-            buckets: buildBuckets(metrics.claims, window_, granularity, now),
+            buckets: buildBuckets(
+              metrics.claims,
+              window_,
+              granularity,
+              now,
+              () => 1,
+              sharedEarliest,
+            ),
           },
           {
             name: SERIES_ERRORS,
@@ -249,6 +260,7 @@ export default function MetricsPanel() {
               granularity,
               now,
               (run) => run.failed,
+              sharedEarliest,
             ),
           },
         ]}
