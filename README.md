@@ -11,6 +11,23 @@ It is a cloud re-implementation of an earlier laptop app: same pipeline
 logic, but hosted on Azure so nothing depends on a laptop being awake, and
 controlled through a browser instead of a local GUI.
 
+## What it looks like
+
+Screenshots from the staging environment — the UI is in Spanish (the
+operator's language), and every claim shown is synthetic test data.
+
+Sign-in is Google-only, and only the allowlisted operator account gets past
+it:
+
+![Sign-in page](assets/screenshots/login.png)
+
+The dashboard is the whole control surface: the worker on/off toggle with
+the last run's outcome, a "Procesar ahora" button for an on-demand run,
+metric counters, a claims-over-time chart, and the claim ledger — each row
+links to the Trello card the pipeline created for that email:
+
+![Dashboard](assets/screenshots/dashboard.png)
+
 ## How it works
 
 - **Worker on/off is a flag, not infrastructure.** A timer fires every
