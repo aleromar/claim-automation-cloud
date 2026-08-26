@@ -20,6 +20,10 @@ export default defineConfig({
   // budget is 120s after two network preflights — default timeouts would kill
   // a healthy run. The run-result expect carries its own 200s budget in-test.
   timeout: 300_000,
+  // Deployed target: each API roundtrip costs 0.5–2.5s on cold Consumption
+  // (KV fetch per request), so a click→POST→status-refetch cycle overruns the
+  // 5s default — the first staging gate run failed exactly there (Bugfix log).
+  expect: { timeout: 15_000 },
   use: {
     baseURL: env.LIVE_FRONTEND_URL,
     // The trace captures a JWT signed with staging's REAL key (1h TTL). It

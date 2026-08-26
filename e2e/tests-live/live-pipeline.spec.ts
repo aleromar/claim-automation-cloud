@@ -181,12 +181,20 @@ test("all six claim types flow through the real pipeline in one run", async ({
 
   // Synchronous run: the response returns only when the pipeline finishes.
   // A pipeline failure 500s the request and the outcome span never renders —
-  // wait for EITHER the outcome or the failure alert, so a broken run fails in
-  // seconds with a reason instead of a 200s blind poll (Gate 3 #2).
+  // wait for EITHER the outcome or the run-failure alert, so a broken run
+  // fails in seconds with a reason instead of a 200s blind poll (Gate 3 #2).
+  // The alert is matched by its TEXT, not role=alert: the ReconnectBanner and
+  // the metrics panel are alerts too, and a banner left over from a previous
+  // failed run matched instantly while the wake was still in flight (staging
+  // gate run 2, Bugfix log).
   await page.getByRole("button", { name: /procesar ahora/i }).click();
-  await expect(
-    page.getByText(/resultado:/i).or(page.getByRole("alert")),
-  ).toBeVisible({ timeout: 200_000 });
+  const runFailed = page.getByText(/la acción ha fallado/i);
+  await expect(page.getByText(/resultado:/i).or(runFailed)).toBeVisible({
+    timeout: 200_000,
+  });
+  if (await runFailed.isVisible()) {
+    throw new Error("process-now returned an error — run-failure alert shown");
+  }
   await expect(page.getByText(/resultado:/i)).toHaveText(/resultado: completado/i, {
     timeout: 5_000,
   });
