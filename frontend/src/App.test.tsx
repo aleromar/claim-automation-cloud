@@ -3,6 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { consumeFragment, getToken } from "./auth";
+import {
+  AUTH_ERROR_UNAUTHORIZED,
+  BACKEND_UNAVAILABLE,
+  CHECKING_BACKEND,
+  CHECKING_SESSION,
+  GOOGLE_FLOW_FAILED,
+  LOG_OUT,
+  METRICS_TITLE,
+  NAV_DASHBOARD,
+  NAV_SETTINGS,
+  SESSION_CONTRACT_ERROR,
+  SIGN_IN_WITH_GOOGLE,
+  WORKER_ENABLED_LABEL,
+  WORKER_TITLE,
+} from "./strings";
 
 const OPERATOR = "operator@example.com";
 
@@ -33,14 +48,29 @@ function mockApi({
       }),
       { status: 200 },
     ),
+  metrics = () =>
+    new Response(
+      JSON.stringify({
+        emails_processed: 0,
+        cards_created: 0,
+        emails_failed: 0,
+        failed_runs: 0,
+        error_runs: [],
+        claims: [],
+      }),
+      { status: 200 },
+    ),
 }: {
   me?: Response | Promise<Response>;
   health?: Response | Promise<Response>;
   worker?: () => Response | Promise<Response>;
   settings?: () => Response | Promise<Response>;
+  metrics?: () => Response | Promise<Response>;
 } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
+    // metrics before me: "/api/me" is a substring of "/api/metrics".
+    if (url.includes("/api/metrics")) return metrics();
     if (url.includes("/api/me")) return me;
     if (url.includes("/api/health")) return health;
     if (url.includes("/api/worker/status")) return worker();
@@ -54,7 +84,7 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     const spy = vi.spyOn(globalThis, "fetch");
     render(<App />);
     expect(
-      screen.getByRole("link", { name: /sign in with google/i }),
+      screen.getByRole("link", { name: SIGN_IN_WITH_GOOGLE }),
     ).toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled();
   });
@@ -64,6 +94,14 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     mockApi();
     render(<App />);
     await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
+    // The dashboard route actually mounts its panels (metrics-dashboard, Gate 3
+    // W3): deleting either composition line must not stay green.
+    expect(
+      await screen.findByRole("heading", { name: METRICS_TITLE }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: WORKER_TITLE }),
+    ).toBeInTheDocument();
   });
 
   it("falls back to the login screen when the session is rejected (REQ-4.3)", async () => {
@@ -72,14 +110,16 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     render(<App />);
     await waitFor(() =>
       expect(
-        screen.getByRole("link", { name: /sign in with google/i }),
+        screen.getByRole("link", { name: SIGN_IN_WITH_GOOGLE }),
       ).toBeInTheDocument(),
     );
   });
 
   it("shows the login error carried in the fragment (REQ-4.4)", () => {
     render(<App initialError="unauthorized" />);
-    expect(screen.getByRole("alert")).toHaveTextContent(/not authorized/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      AUTH_ERROR_UNAUTHORIZED,
+    );
   });
 
   it("logs out: clears the stored token and shows the login screen (REQ-4.5/4.6)", async () => {
@@ -89,10 +129,10 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
     const fetchCallsBeforeLogout = fetchSpy.mock.calls.length;
 
-    fireEvent.click(screen.getByRole("button", { name: /log out/i }));
+    fireEvent.click(screen.getByRole("button", { name: LOG_OUT }));
 
     expect(
-      screen.getByRole("link", { name: /sign in with google/i }),
+      screen.getByRole("link", { name: SIGN_IN_WITH_GOOGLE }),
     ).toBeInTheDocument();
     expect(getToken()).toBeNull();
     // Client-side only (no server revocation): logout must issue no API call.
@@ -104,7 +144,7 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     mockApi();
     render(<App />);
     expect(
-      await screen.findByRole("switch", { name: /worker enabled/i }),
+      await screen.findByRole("switch", { name: WORKER_ENABLED_LABEL }),
     ).toBeInTheDocument();
   });
 
@@ -112,7 +152,7 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     storeToken();
     mockApi({ me: new Promise<Response>(() => {}) });
     render(<App />);
-    expect(screen.getByText(/checking session/i)).toBeInTheDocument();
+    expect(screen.getByText(CHECKING_SESSION)).toBeInTheDocument();
   });
 
   it("shows a clear error when /api/me returns 200 without an email", async () => {
@@ -121,7 +161,7 @@ describe("App authentication gate (REQ-1.1, REQ-4)", () => {
     render(<App />);
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        /session check returned an unexpected response/i,
+        SESSION_CONTRACT_ERROR,
       ),
     );
   });
@@ -137,17 +177,17 @@ describe("App navigation (settings REQ-4.1) and authed error banner (REQ-4.8)", 
     storeToken();
     mockApi();
     render(<App />);
-    await screen.findByRole("switch", { name: /worker enabled/i });
+    await screen.findByRole("switch", { name: WORKER_ENABLED_LABEL });
 
-    fireEvent.click(screen.getByRole("link", { name: /settings/i }));
+    fireEvent.click(screen.getByRole("link", { name: NAV_SETTINGS }));
     expect(
-      await screen.findByRole("heading", { name: /settings/i }),
+      await screen.findByRole("heading", { name: NAV_SETTINGS }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("switch")).toBeNull();
 
-    fireEvent.click(screen.getByRole("link", { name: /dashboard/i }));
+    fireEvent.click(screen.getByRole("link", { name: NAV_DASHBOARD }));
     expect(
-      await screen.findByRole("switch", { name: /worker enabled/i }),
+      await screen.findByRole("switch", { name: WORKER_ENABLED_LABEL }),
     ).toBeInTheDocument();
   });
 
@@ -158,7 +198,9 @@ describe("App navigation (settings REQ-4.1) and authed error banner (REQ-4.8)", 
     mockApi();
     render(<App initialError="login_failed" />);
     await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
-    expect(screen.getByRole("alert")).toHaveTextContent(/google.*failed/i);
+    // Word-order trap (gate triage): assert the Spanish constant directly,
+    // not an English-shaped /google.*failed/i regex.
+    expect(screen.getByRole("alert")).toHaveTextContent(GOOGLE_FLOW_FAILED);
   });
 
   it("renders fixed banner copy, never the fragment's free text", async () => {
@@ -169,7 +211,7 @@ describe("App navigation (settings REQ-4.1) and authed error banner (REQ-4.8)", 
     render(<App initialError="EVIL_FREE_TEXT" />);
     await waitFor(() => expect(screen.getByText(OPERATOR)).toBeInTheDocument());
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent(/google.*failed/i);
+    expect(alert).toHaveTextContent(GOOGLE_FLOW_FAILED);
     expect(alert).not.toHaveTextContent(/EVIL_FREE_TEXT/);
   });
 
@@ -181,7 +223,7 @@ describe("App navigation (settings REQ-4.1) and authed error banner (REQ-4.8)", 
     mockApi();
     render(<App />);
     expect(
-      await screen.findByRole("switch", { name: /worker enabled/i }),
+      await screen.findByRole("switch", { name: WORKER_ENABLED_LABEL }),
     ).toBeInTheDocument();
   });
 });
@@ -236,7 +278,7 @@ describe("App version footer (version-display REQ-3)", () => {
   it("renders no footer on the login screen (REQ-3.4)", () => {
     render(<App />);
     expect(
-      screen.getByRole("link", { name: /sign in with google/i }),
+      screen.getByRole("link", { name: SIGN_IN_WITH_GOOGLE }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("contentinfo")).toBeNull();
   });
@@ -252,7 +294,7 @@ describe("App health status inside the authenticated dashboard (walking-skeleton
     const footer = await screen.findByRole("contentinfo");
     await waitFor(() => expect(footer).toHaveTextContent(/backend unknown/));
     expect(screen.queryByText(/all good/i)).toBeNull();
-    expect(screen.queryByText(/backend unavailable/i)).toBeNull();
+    expect(screen.queryByText(new RegExp(BACKEND_UNAVAILABLE))).toBeNull();
   });
 
   it("shows an error state on a non-ok HTTP status", async () => {
@@ -260,7 +302,9 @@ describe("App health status inside the authenticated dashboard (walking-skeleton
     mockApi({ health: new Response("", { status: 503 }) });
     render(<App />);
     await waitFor(() =>
-      expect(screen.getByText(/backend unavailable/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(new RegExp(BACKEND_UNAVAILABLE)),
+      ).toBeInTheDocument(),
     );
   });
 
@@ -273,7 +317,9 @@ describe("App health status inside the authenticated dashboard (walking-skeleton
     });
     render(<App />);
     await waitFor(() =>
-      expect(screen.getByText(/backend unavailable/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(new RegExp(BACKEND_UNAVAILABLE)),
+      ).toBeInTheDocument(),
     );
   });
 
@@ -282,7 +328,7 @@ describe("App health status inside the authenticated dashboard (walking-skeleton
     mockApi({ health: new Promise<Response>(() => {}) });
     render(<App />);
     await waitFor(() =>
-      expect(screen.getByText(/checking backend/i)).toBeInTheDocument(),
+      expect(screen.getByText(CHECKING_BACKEND)).toBeInTheDocument(),
     );
   });
 });

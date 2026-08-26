@@ -18,5 +18,8 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: "./src/setupTests.ts",
+    // Local-time bucket helpers (metrics-dashboard gate M3): pin the zone so
+    // the same test reads the same day on CI (UTC) and the laptop (CET).
+    env: { TZ: "Europe/Madrid" },
   },
 });

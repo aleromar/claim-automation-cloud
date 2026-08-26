@@ -2,8 +2,29 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import Settings, { type TrelloSaveRequest } from "./Settings";
+import {
+  API_KEY_LABEL,
+  API_TOKEN_LABEL,
+  BOARD_ID_LABEL,
+  LIST_ID_LABEL,
+  NOT_SET_BADGE,
+  RECONNECT_GMAIL,
+  REFRESH_TOKEN_LABEL,
+  SAVE_FAILED,
+  SAVE_TRELLO,
+  SETTINGS_UNAVAILABLE,
+  STORED_BADGE,
+  TOKEN_STORED,
+} from "./strings";
 
 const OPERATOR = "operator@example.com";
+
+// Label text is "<field> <badge>" (e.g. "Clave API (guardado)") — the badge
+// constants carry literal parens, so build a safe regex instead of a raw one.
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const labelWithBadge = (label: string, badge: string) =>
+  new RegExp(`${escapeRegExp(label)}.*${escapeRegExp(badge)}`, "i");
 
 const settingsBody = {
   trello: {
@@ -54,20 +75,30 @@ describe("Settings load state (REQ-4.2)", () => {
     mockSettingsApi();
     render(<Settings />);
     expect(
-      await screen.findByLabelText(/api key \(stored\)/i),
+      await screen.findByLabelText(labelWithBadge(API_KEY_LABEL, STORED_BADGE)),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText(/api token \(not set\)/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/board id/i)).toHaveValue("board-1");
-    expect(screen.getByLabelText(/list id/i)).toHaveValue("list-1");
+    expect(
+      screen.getByLabelText(labelWithBadge(API_TOKEN_LABEL, NOT_SET_BADGE)),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(new RegExp(BOARD_ID_LABEL, "i"))).toHaveValue(
+      "board-1",
+    );
+    expect(screen.getByLabelText(new RegExp(LIST_ID_LABEL, "i"))).toHaveValue(
+      "list-1",
+    );
     expect(screen.getByText(OPERATOR)).toBeInTheDocument();
-    expect(screen.getByText(/refresh token: stored/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new RegExp(`${REFRESH_TOKEN_LABEL} ${TOKEN_STORED}`, "i"),
+      ),
+    ).toBeInTheDocument();
   });
 
   it("renders secret inputs write-only: password type, autofill off, never prefilled (REQ-4.6)", async () => {
     mockSettingsApi();
     render(<Settings />);
-    const apiKey = await screen.findByLabelText(/api key/i);
-    const token = screen.getByLabelText(/api token/i);
+    const apiKey = await screen.findByLabelText(new RegExp(API_KEY_LABEL, "i"));
+    const token = screen.getByLabelText(new RegExp(API_TOKEN_LABEL, "i"));
     for (const input of [apiKey, token]) {
       expect(input).toHaveAttribute("type", "password");
       // Password managers autofill would defeat blank=keep and silently
@@ -81,7 +112,7 @@ describe("Settings load state (REQ-4.2)", () => {
     mockSettingsApi();
     render(<Settings />);
     const reconnect = await screen.findByRole("button", {
-      name: /reconnect gmail/i,
+      name: RECONNECT_GMAIL,
     });
     expect(reconnect).toHaveAttribute("href", "/api/auth/reconnect");
   });
@@ -90,9 +121,7 @@ describe("Settings load state (REQ-4.2)", () => {
     mockSettingsApi({ state: () => new Response("", { status: 503 }) });
     render(<Settings />);
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        /settings unavailable/i,
-      ),
+      expect(screen.getByRole("alert")).toHaveTextContent(SETTINGS_UNAVAILABLE),
     );
   });
 
@@ -103,9 +132,7 @@ describe("Settings load state (REQ-4.2)", () => {
     });
     render(<Settings />);
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        /settings unavailable/i,
-      ),
+      expect(screen.getByRole("alert")).toHaveTextContent(SETTINGS_UNAVAILABLE),
     );
   });
 });
@@ -128,12 +155,14 @@ describe("Settings save (REQ-4.3/4.7)", () => {
       },
     });
     render(<Settings />);
-    const token = await screen.findByLabelText(/api token/i);
+    const token = await screen.findByLabelText(
+      new RegExp(API_TOKEN_LABEL, "i"),
+    );
     fireEvent.change(token, { target: { value: "tok-new" } });
-    fireEvent.change(screen.getByLabelText(/board id/i), {
+    fireEvent.change(screen.getByLabelText(new RegExp(BOARD_ID_LABEL, "i")), {
       target: { value: "board-2" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_TRELLO }));
 
     // Blank api_key posts as "" — blank=keep is the backend's contract (REQ-2.2).
     await waitFor(() =>
@@ -147,9 +176,11 @@ describe("Settings save (REQ-4.3/4.7)", () => {
       ]),
     );
     // Response is the new truth: badge flips, secret input cleared.
-    expect(await screen.findByLabelText(/api token \(stored\)/i)).toHaveValue(
-      "",
-    );
+    expect(
+      await screen.findByLabelText(
+        labelWithBadge(API_TOKEN_LABEL, STORED_BADGE),
+      ),
+    ).toHaveValue("");
   });
 
   it("disables the form while the save is in flight", async () => {
@@ -158,9 +189,9 @@ describe("Settings save (REQ-4.3/4.7)", () => {
       save: () => new Promise<Response>((resolve) => (release = resolve)),
     });
     render(<Settings />);
-    await screen.findByLabelText(/board id/i);
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+    await screen.findByLabelText(new RegExp(BOARD_ID_LABEL, "i"));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_TRELLO }));
+    expect(screen.getByRole("button", { name: SAVE_TRELLO })).toBeDisabled();
     release(
       new Response(
         JSON.stringify({
@@ -173,22 +204,26 @@ describe("Settings save (REQ-4.3/4.7)", () => {
       ),
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /save/i })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: SAVE_TRELLO })).toBeEnabled(),
     );
   });
 
   it("keeps the typed secrets in the inputs when the save fails", async () => {
     mockSettingsApi({ save: () => new Response("", { status: 500 }) });
     render(<Settings />);
-    const token = await screen.findByLabelText(/api token/i);
+    const token = await screen.findByLabelText(
+      new RegExp(API_TOKEN_LABEL, "i"),
+    );
     fireEvent.change(token, { target: { value: "tok-typed" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_TRELLO }));
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/save failed/i),
+      expect(screen.getByRole("alert")).toHaveTextContent(SAVE_FAILED),
     );
     // Clearing on failure would make the retry post "" → blank=keep → the new
     // credential silently lost (P10 gate CRITICAL through a different door).
-    expect(screen.getByLabelText(/api token/i)).toHaveValue("tok-typed");
+    expect(screen.getByLabelText(new RegExp(API_TOKEN_LABEL, "i"))).toHaveValue(
+      "tok-typed",
+    );
   });
 
   it("re-reads settings after a failed save: badges tell the stored truth, typed IDs survive", async () => {
@@ -209,30 +244,34 @@ describe("Settings save (REQ-4.3/4.7)", () => {
       save: () => new Response("", { status: 500 }),
     });
     render(<Settings />);
-    await screen.findByLabelText(/api token \(not set\)/i);
-    fireEvent.change(screen.getByLabelText(/board id/i), {
+    await screen.findByLabelText(
+      labelWithBadge(API_TOKEN_LABEL, NOT_SET_BADGE),
+    );
+    fireEvent.change(screen.getByLabelText(new RegExp(BOARD_ID_LABEL, "i")), {
       target: { value: "board-edited" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_TRELLO }));
 
     // Never assume a write landed — re-read (the WorkerControls rule).
     expect(
-      await screen.findByLabelText(/api token \(stored\)/i),
+      await screen.findByLabelText(
+        labelWithBadge(API_TOKEN_LABEL, STORED_BADGE),
+      ),
     ).toBeInTheDocument();
     // The re-read must not clobber operator input: retry re-sends these IDs.
-    expect(screen.getByLabelText(/board id/i)).toHaveValue("board-edited");
-    expect(screen.getByRole("alert")).toHaveTextContent(/save failed/i);
+    expect(screen.getByLabelText(new RegExp(BOARD_ID_LABEL, "i"))).toHaveValue(
+      "board-edited",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(SAVE_FAILED);
   });
 
   it("shows a retry-is-safe error state when the save fails (REQ-4.7)", async () => {
     mockSettingsApi({ save: () => new Response("", { status: 500 }) });
     render(<Settings />);
-    await screen.findByLabelText(/board id/i);
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await screen.findByLabelText(new RegExp(BOARD_ID_LABEL, "i"));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_TRELLO }));
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        /save failed.*safe to retry/i,
-      ),
+      expect(screen.getByRole("alert")).toHaveTextContent(SAVE_FAILED),
     );
   });
 });

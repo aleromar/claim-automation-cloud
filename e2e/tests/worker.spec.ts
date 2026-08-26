@@ -12,17 +12,17 @@ test("operator sets the worker off and process-now reports skipped", async ({
 }) => {
   await login(page);
 
-  const workerSwitch = page.getByRole("switch", { name: /worker enabled/i });
+  const workerSwitch = page.getByRole("switch", { name: /proceso activado/i });
   await expect(workerSwitch).toBeVisible();
   if (await workerSwitch.isChecked()) {
     await workerSwitch.click();
   }
   await expect(workerSwitch).not.toBeChecked();
 
-  await page.getByRole("button", { name: /process now/i }).click();
-  await expect(page.getByText(/run result:/i)).toHaveText(
-    /skipped \(worker off\)/i,
+  await page.getByRole("button", { name: /procesar ahora/i }).click();
+  await expect(page.getByText(/resultado:/i)).toHaveText(
+    /omitido \(proceso desactivado\)/i,
   );
   // The wake wrote its end-of-run heartbeat: last-run now shows a timestamp.
-  await expect(page.getByText(/last run:/i)).not.toHaveText(/never/i);
+  await expect(page.getByText(/última ejecución:/i)).not.toHaveText(/nunca/i);
 });

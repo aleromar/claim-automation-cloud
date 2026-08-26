@@ -2,6 +2,26 @@ import { useEffect, useState } from "react";
 
 import { apiUrl } from "./api";
 import { authFetch } from "./auth";
+import {
+  ACCOUNT_LABEL,
+  API_KEY_LABEL,
+  API_TOKEN_LABEL,
+  BOARD_ID_LABEL,
+  LIST_ID_LABEL,
+  LOADING_SETTINGS,
+  NOT_SET_BADGE,
+  PLACEHOLDER_KEEP_KEY,
+  PLACEHOLDER_KEEP_TOKEN,
+  RECONNECT_GMAIL,
+  REFRESH_TOKEN_LABEL,
+  SAVE_FAILED,
+  SAVE_TRELLO,
+  SETTINGS_TITLE,
+  SETTINGS_UNAVAILABLE,
+  STORED_BADGE,
+  TOKEN_NOT_SET,
+  TOKEN_STORED,
+} from "./strings";
 
 type TrelloState = {
   api_key_stored: boolean;
@@ -50,7 +70,8 @@ function isGmailState(value: unknown): value is GmailState {
   );
 }
 
-const storedBadge = (stored: boolean) => (stored ? "(stored)" : "(not set)");
+const storedBadge = (stored: boolean) =>
+  stored ? STORED_BADGE : NOT_SET_BADGE;
 
 export default function Settings() {
   const [page, setPage] = useState<Page>({ status: "loading" });
@@ -138,22 +159,22 @@ export default function Settings() {
   if (page.status === "loading") {
     return (
       <article>
-        <h2>Settings</h2>
-        <p aria-busy="true">Loading settings…</p>
+        <h2>{SETTINGS_TITLE}</h2>
+        <p aria-busy="true">{LOADING_SETTINGS}</p>
       </article>
     );
   }
   if (page.status === "error") {
     return (
       <article>
-        <h2>Settings</h2>
-        <p role="alert">⚠️ Settings unavailable</p>
+        <h2>{SETTINGS_TITLE}</h2>
+        <p role="alert">⚠️ {SETTINGS_UNAVAILABLE}</p>
       </article>
     );
   }
   return (
     <article>
-      <h2>Settings</h2>
+      <h2>{SETTINGS_TITLE}</h2>
       <section>
         <h3>Trello</h3>
         <form
@@ -163,29 +184,29 @@ export default function Settings() {
           }}
         >
           <label>
-            API key {storedBadge(page.trello.api_key_stored)}
+            {API_KEY_LABEL} {storedBadge(page.trello.api_key_stored)}
             <input
               type="password"
               autoComplete="new-password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               disabled={busy}
-              placeholder="leave blank to keep the stored key"
+              placeholder={PLACEHOLDER_KEEP_KEY}
             />
           </label>
           <label>
-            API token {storedBadge(page.trello.token_stored)}
+            {API_TOKEN_LABEL} {storedBadge(page.trello.token_stored)}
             <input
               type="password"
               autoComplete="new-password"
               value={token}
               onChange={(event) => setToken(event.target.value)}
               disabled={busy}
-              placeholder="leave blank to keep the stored token"
+              placeholder={PLACEHOLDER_KEEP_TOKEN}
             />
           </label>
           <label>
-            Board ID
+            {BOARD_ID_LABEL}
             <input
               type="text"
               value={boardId}
@@ -194,7 +215,7 @@ export default function Settings() {
             />
           </label>
           <label>
-            List ID
+            {LIST_ID_LABEL}
             <input
               type="text"
               value={listId}
@@ -203,27 +224,23 @@ export default function Settings() {
             />
           </label>
           <button type="submit" disabled={busy} aria-busy={busy}>
-            Save Trello settings
+            {SAVE_TRELLO}
           </button>
-          {saveFailed && (
-            <p role="alert">
-              ⚠️ Save failed — nothing was lost and it is safe to retry.
-            </p>
-          )}
+          {saveFailed && <p role="alert">⚠️ {SAVE_FAILED}</p>}
         </form>
       </section>
       <section>
         <h3>Gmail</h3>
         <p>
-          Account: <strong>{page.gmail.account_email}</strong>
+          {ACCOUNT_LABEL} <strong>{page.gmail.account_email}</strong>
           <br />
-          Refresh token:{" "}
-          {page.gmail.refresh_token_stored ? "stored" : "not set"}
+          {REFRESH_TOKEN_LABEL}{" "}
+          {page.gmail.refresh_token_stored ? TOKEN_STORED : TOKEN_NOT_SET}
         </p>
         {/* Top-level navigation on purpose: the consent flow must leave the
             SPA, and navigations cannot carry the Bearer header (REQ-3.4). */}
         <a href={RECONNECT_URL} role="button" className="secondary">
-          Reconnect Gmail
+          {RECONNECT_GMAIL}
         </a>
       </section>
     </article>

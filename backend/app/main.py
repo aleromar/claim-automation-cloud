@@ -19,6 +19,7 @@ from core.secret_store import (
     create_secret_store,
     require_secret,
 )
+from app.metrics_routes import router as metrics_router
 from app.security import require_operator
 from app.settings_routes import router as settings_router
 from app.version import get_build_version
@@ -48,6 +49,7 @@ app = FastAPI(title="claim-automation-cloud", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(worker_router)
 app.include_router(settings_router)
+app.include_router(metrics_router)
 
 
 @app.exception_handler(RequestValidationError)

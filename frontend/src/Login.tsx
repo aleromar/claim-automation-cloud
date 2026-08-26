@@ -4,6 +4,7 @@
 
 import { apiUrl } from "./api";
 import { authErrorMessage } from "./auth";
+import { BRAND, SIGN_IN_WITH_GOOGLE } from "./strings";
 
 const buttonStyle: React.CSSProperties = {
   display: "inline-flex",
@@ -46,10 +47,10 @@ function GoogleLogo() {
 export default function Login({ error }: { error: string | null }) {
   return (
     <main className="container">
-      <h1>Claim Automation</h1>
+      <h1>{BRAND}</h1>
       <a href={apiUrl("/api/auth/login")} style={buttonStyle}>
         <GoogleLogo />
-        Sign in with Google
+        {SIGN_IN_WITH_GOOGLE}
       </a>
       {error && <p role="alert">{authErrorMessage(error)}</p>}
     </main>

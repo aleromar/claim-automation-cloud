@@ -1,6 +1,19 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  ACTION_FAILED,
+  countsText,
+  failedGaugeText,
+  LAST_RUN_PREFIX,
+  matchingEmailsText,
+  NEVER_RAN,
+  OUTCOME_LABELS,
+  PROCESS_NOW,
+  RUN_RESULT_PREFIX,
+  WORKER_ENABLED_LABEL,
+  WORKER_STATUS_UNAVAILABLE,
+} from "./strings";
 import WorkerControls from "./WorkerControls";
 
 type HeartbeatBody = {
@@ -52,10 +65,12 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     mockWorkerApi();
     render(<WorkerControls />);
     const workerSwitch = await screen.findByRole("switch", {
-      name: /worker enabled/i,
+      name: WORKER_ENABLED_LABEL,
     });
     expect(workerSwitch).not.toBeChecked();
-    expect(screen.getByText(/last run:/i)).toHaveTextContent(/never/i);
+    expect(screen.getByText(new RegExp(LAST_RUN_PREFIX))).toHaveTextContent(
+      NEVER_RAN,
+    );
   });
 
   it("renders the last-run timestamp and outcome label", async () => {
@@ -64,11 +79,11 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
       status: statusResponse(true, { at, status: "skipped_disabled" }),
     });
     render(<WorkerControls />);
-    const lastRun = await screen.findByText(/last run:/i);
+    const lastRun = await screen.findByText(new RegExp(LAST_RUN_PREFIX));
     expect(lastRun).toHaveTextContent(new Date(at).toLocaleString());
-    expect(lastRun).toHaveTextContent(/skipped \(worker off\)/i);
+    expect(lastRun).toHaveTextContent(OUTCOME_LABELS.skipped_disabled);
     expect(
-      screen.getByRole("switch", { name: /worker enabled/i }),
+      screen.getByRole("switch", { name: WORKER_ENABLED_LABEL }),
     ).toBeChecked();
   });
 
@@ -80,8 +95,8 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
       }),
     });
     render(<WorkerControls />);
-    const lastRun = await screen.findByText(/last run:/i);
-    expect(lastRun).toHaveTextContent(/skipped \(gmail needs reconnect\)/i);
+    const lastRun = await screen.findByText(new RegExp(LAST_RUN_PREFIX));
+    expect(lastRun).toHaveTextContent(OUTCOME_LABELS.skipped_no_access);
   });
 
   it("renders the matched count next to a ran heartbeat (gmail-client REQ-5)", async () => {
@@ -93,8 +108,10 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
       }),
     });
     render(<WorkerControls />);
-    const lastRun = await screen.findByText(/last run:/i);
-    expect(lastRun).toHaveTextContent(/ran — 3 matching emails/i);
+    const lastRun = await screen.findByText(new RegExp(LAST_RUN_PREFIX));
+    expect(lastRun).toHaveTextContent(
+      `${OUTCOME_LABELS.ran} — ${matchingEmailsText(3)}`,
+    );
   });
 
   it("renders a singular label for exactly one matched email", async () => {
@@ -106,8 +123,11 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
       }),
     });
     render(<WorkerControls />);
-    const lastRun = await screen.findByText(/last run:/i);
-    expect(lastRun).toHaveTextContent(/ran — 1 matching email(?!s)/i);
+    const lastRun = await screen.findByText(new RegExp(LAST_RUN_PREFIX));
+    expect(lastRun).toHaveTextContent(
+      `${OUTCOME_LABELS.ran} — ${matchingEmailsText(1)}`,
+    );
+    expect(lastRun).not.toHaveTextContent(matchingEmailsText(2));
   });
 
   it("treats a non-numeric matched as a broken contract (error state)", async () => {
@@ -128,7 +148,7 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     render(<WorkerControls />);
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        /worker status unavailable/i,
+        WORKER_STATUS_UNAVAILABLE,
       ),
     );
   });
@@ -142,8 +162,10 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
       }),
     });
     render(<WorkerControls />);
-    const lastRun = await screen.findByText(/last run:/i);
-    expect(lastRun).toHaveTextContent(/ran — 0 matching emails/i);
+    const lastRun = await screen.findByText(new RegExp(LAST_RUN_PREFIX));
+    expect(lastRun).toHaveTextContent(
+      `${OUTCOME_LABELS.ran} — ${matchingEmailsText(0)}`,
+    );
   });
 
   it("renders no count when matched is absent (older backends / pre-5b rows)", async () => {
@@ -154,9 +176,9 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
       }),
     });
     render(<WorkerControls />);
-    const lastRun = await screen.findByText(/last run:/i);
-    expect(lastRun).toHaveTextContent(/ran/i);
-    expect(lastRun).not.toHaveTextContent(/matching emails/i);
+    const lastRun = await screen.findByText(new RegExp(LAST_RUN_PREFIX));
+    expect(lastRun).toHaveTextContent(OUTCOME_LABELS.ran);
+    expect(lastRun).not.toHaveTextContent(/coincidente/i);
   });
 
   it("renders no count when matched is null (non-ran outcomes)", async () => {
@@ -168,8 +190,8 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
       }),
     });
     render(<WorkerControls />);
-    const lastRun = await screen.findByText(/last run:/i);
-    expect(lastRun).not.toHaveTextContent(/matching emails/i);
+    const lastRun = await screen.findByText(new RegExp(LAST_RUN_PREFIX));
+    expect(lastRun).not.toHaveTextContent(/coincidente/i);
   });
 
   it("shows the error state when the status fetch fails", async () => {
@@ -177,7 +199,7 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     render(<WorkerControls />);
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        /worker status unavailable/i,
+        WORKER_STATUS_UNAVAILABLE,
       ),
     );
   });
@@ -192,7 +214,7 @@ describe("WorkerControls status display (REQ-4.1/4.2)", () => {
     render(<WorkerControls />);
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        /worker status unavailable/i,
+        WORKER_STATUS_UNAVAILABLE,
       ),
     );
   });
@@ -203,7 +225,7 @@ describe("WorkerControls toggle (REQ-4.3)", () => {
     const spy = mockWorkerApi();
     render(<WorkerControls />);
     const workerSwitch = await screen.findByRole("switch", {
-      name: /worker enabled/i,
+      name: WORKER_ENABLED_LABEL,
     });
     fireEvent.click(workerSwitch);
     await waitFor(() => expect(workerSwitch).toBeChecked());
@@ -218,11 +240,11 @@ describe("WorkerControls toggle (REQ-4.3)", () => {
     mockWorkerApi({ enabled: () => new Promise<Response>(() => {}) });
     render(<WorkerControls />);
     const workerSwitch = await screen.findByRole("switch", {
-      name: /worker enabled/i,
+      name: WORKER_ENABLED_LABEL,
     });
     fireEvent.click(workerSwitch);
     await waitFor(() => expect(workerSwitch).toBeDisabled());
-    expect(screen.getByRole("button", { name: /process now/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: PROCESS_NOW })).toBeDisabled();
   });
 
   it("shows an inline error and re-fetches status when the toggle fails", async () => {
@@ -231,10 +253,10 @@ describe("WorkerControls toggle (REQ-4.3)", () => {
     });
     render(<WorkerControls />);
     fireEvent.click(
-      await screen.findByRole("switch", { name: /worker enabled/i }),
+      await screen.findByRole("switch", { name: WORKER_ENABLED_LABEL }),
     );
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/action failed/i),
+      expect(screen.getByRole("alert")).toHaveTextContent(ACTION_FAILED),
     );
     // Initial load + post-failure refresh: never assume the write landed.
     expect(statusCalls(spy)).toBe(2);
@@ -245,13 +267,11 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
   it("shows the returned outcome label and refreshes status", async () => {
     const spy = mockWorkerApi();
     render(<WorkerControls />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /process now/i }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: PROCESS_NOW }));
     await waitFor(() =>
-      expect(screen.getByText(/run result:/i)).toHaveTextContent(
-        /skipped \(worker off\)/i,
-      ),
+      expect(
+        screen.getByText(new RegExp(RUN_RESULT_PREFIX, "i")),
+      ).toHaveTextContent(OUTCOME_LABELS.skipped_disabled),
     );
     expect(statusCalls(spy)).toBe(2);
   });
@@ -266,13 +286,11 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
         }),
     });
     render(<WorkerControls />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /process now/i }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: PROCESS_NOW }));
     await waitFor(() =>
-      expect(screen.getByText(/run result:/i)).toHaveTextContent(
-        /paused_maintenance/,
-      ),
+      expect(
+        screen.getByText(new RegExp(RUN_RESULT_PREFIX, "i")),
+      ).toHaveTextContent(/paused_maintenance/),
     );
   });
 
@@ -284,13 +302,11 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
         }),
     });
     render(<WorkerControls />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /process now/i }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: PROCESS_NOW }));
     await waitFor(() =>
-      expect(screen.getByText(/run result:/i)).toHaveTextContent(
-        /skipped \(gmail needs reconnect\)/i,
-      ),
+      expect(
+        screen.getByText(new RegExp(RUN_RESULT_PREFIX, "i")),
+      ).toHaveTextContent(OUTCOME_LABELS.skipped_no_access),
     );
   });
 
@@ -299,24 +315,24 @@ describe("WorkerControls process-now (REQ-4.4/4.5)", () => {
     // OLD enabled state — misleading, so toggling must clear it.
     mockWorkerApi();
     render(<WorkerControls />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /process now/i }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: PROCESS_NOW }));
     await waitFor(() =>
-      expect(screen.getByText(/run result:/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(new RegExp(RUN_RESULT_PREFIX, "i")),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole("switch", { name: /worker enabled/i }));
-    await waitFor(() => expect(screen.queryByText(/run result:/i)).toBeNull());
+    fireEvent.click(screen.getByRole("switch", { name: WORKER_ENABLED_LABEL }));
+    await waitFor(() =>
+      expect(screen.queryByText(new RegExp(RUN_RESULT_PREFIX, "i"))).toBeNull(),
+    );
   });
 
   it("shows an inline error and re-fetches status when the run 500s", async () => {
     const spy = mockWorkerApi({ run: () => new Response("", { status: 500 }) });
     render(<WorkerControls />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /process now/i }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: PROCESS_NOW }));
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/action failed/i),
+      expect(screen.getByRole("alert")).toHaveTextContent(ACTION_FAILED),
     );
     // The heartbeat row carries the truth (`failed`) — the refresh surfaces it.
     expect(statusCalls(spy)).toBe(2);
@@ -335,7 +351,9 @@ describe("run counts and the failed-state gauge (pipeline-wiring REQ-10)", () =>
       }),
     });
     render(<WorkerControls />);
-    await screen.findByText(/3 processed, 1 failed · 2 in failed state/);
+    await screen.findByText(`${countsText(3, 1)} · ${failedGaugeText("2")}`, {
+      exact: false,
+    });
   });
 
   it("renders zero counts (0 is a successful, informative run)", async () => {
@@ -349,7 +367,9 @@ describe("run counts and the failed-state gauge (pipeline-wiring REQ-10)", () =>
       }),
     });
     render(<WorkerControls />);
-    await screen.findByText(/0 processed, 0 failed · 0 in failed state/);
+    await screen.findByText(`${countsText(0, 0)} · ${failedGaugeText("0")}`, {
+      exact: false,
+    });
   });
 
   it("renders the gauge cap as 100+", async () => {
@@ -363,7 +383,7 @@ describe("run counts and the failed-state gauge (pipeline-wiring REQ-10)", () =>
       }),
     });
     render(<WorkerControls />);
-    await screen.findByText(/100\+ in failed state/);
+    await screen.findByText(failedGaugeText("100+"), { exact: false });
   });
 
   it("omits the gauge segment when failed_total is null (gauge unavailable)", async () => {
@@ -377,8 +397,8 @@ describe("run counts and the failed-state gauge (pipeline-wiring REQ-10)", () =>
       }),
     });
     render(<WorkerControls />);
-    await screen.findByText(/2 processed, 0 failed$/);
-    expect(screen.queryByText(/in failed state/)).toBeNull();
+    await screen.findByText(new RegExp(`${countsText(2, 0)}$`));
+    expect(screen.queryByText(/en estado fallido/)).toBeNull();
   });
 
   it("keeps rendering the legacy matched line on pre-5c rows", async () => {
@@ -390,7 +410,7 @@ describe("run counts and the failed-state gauge (pipeline-wiring REQ-10)", () =>
       }),
     });
     render(<WorkerControls />);
-    await screen.findByText(/3 matching emails/);
+    await screen.findByText(matchingEmailsText(3), { exact: false });
   });
 
   it("labels a skipped_busy heartbeat (REQ-12)", async () => {
@@ -401,6 +421,6 @@ describe("run counts and the failed-state gauge (pipeline-wiring REQ-10)", () =>
       }),
     });
     render(<WorkerControls />);
-    await screen.findByText(/skipped \(another run in progress\)/);
+    await screen.findByText(OUTCOME_LABELS.skipped_busy, { exact: false });
   });
 });
