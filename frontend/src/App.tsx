@@ -10,14 +10,27 @@ import {
 import { apiUrl } from "./api";
 import { authErrorMessage, authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
+import MetricsPanel from "./MetricsPanel";
+import ReconnectBanner from "./ReconnectBanner";
 import Settings from "./Settings";
-import WorkerControls from "./WorkerControls";
+import {
+  BACKEND_UNAVAILABLE,
+  BRAND,
+  CHECKING_BACKEND,
+  CHECKING_SESSION,
+  GOOGLE_FLOW_FAILED,
+  LOG_OUT,
+  NAV_DASHBOARD,
+  NAV_SETTINGS,
+  SESSION_CONTRACT_ERROR,
+} from "./strings";
 import {
   buildVersion,
   MISSING_VERSION,
   shortSha,
   UNKNOWN_VERSION,
 } from "./version";
+import WorkerControls from "./WorkerControls";
 
 // Discriminated union: the email exists only in the authed state.
 type Session =
@@ -63,8 +76,7 @@ export default function App({
           // silently bounce the operator back to the login screen.
           setSession({
             status: "error",
-            message:
-              "Session check returned an unexpected response (no account email).",
+            message: SESSION_CONTRACT_ERROR,
           });
         }
       })
@@ -111,15 +123,15 @@ export default function App({
   if (session.status === "checking") {
     return (
       <main className="container">
-        <h1>Claim Automation</h1>
-        <p aria-busy="true">Checking session…</p>
+        <h1>{BRAND}</h1>
+        <p aria-busy="true">{CHECKING_SESSION}</p>
       </main>
     );
   }
   if (session.status === "error") {
     return (
       <main className="container">
-        <h1>Claim Automation</h1>
+        <h1>{BRAND}</h1>
         <p role="alert">⚠️ {session.message}</p>
       </main>
     );
@@ -144,20 +156,20 @@ export default function App({
               {/* Real h1 (heading outline: WorkerControls' h2 nests under it —
                   review M4); sized inline to brand text, Pico has no nav-h1
                   primitive. Inline-style precedent: Login's Google button. */}
-              <h1 style={{ fontSize: "1rem", margin: 0 }}>Claim Automation</h1>
+              <h1 style={{ fontSize: "1rem", margin: 0 }}>{BRAND}</h1>
             </li>
             <li>
-              <NavLink to="/">Dashboard</NavLink>
+              <NavLink to="/">{NAV_DASHBOARD}</NavLink>
             </li>
             <li>
-              <NavLink to="/settings">Settings</NavLink>
+              <NavLink to="/settings">{NAV_SETTINGS}</NavLink>
             </li>
           </ul>
           <ul>
             <li>{session.email}</li>
             <li>
               <button className="secondary" onClick={logout}>
-                Log out
+                {LOG_OUT}
               </button>
             </li>
           </ul>
@@ -170,7 +182,7 @@ export default function App({
             attacker-writable free text. */}
         {initialError && (
           <p role="alert">
-            ⚠️ Google flow failed. {authErrorMessage(initialError)}
+            ⚠️ {GOOGLE_FLOW_FAILED} {authErrorMessage(initialError)}
           </p>
         )}
         <Routes>
@@ -181,10 +193,12 @@ export default function App({
                 {/* Healthy is silent (operator, 2026-08-18) — only loading and
                     problems surface; the footer version proves the ok path. */}
                 {health.status === "loading" && (
-                  <p aria-busy="true">Checking backend…</p>
+                  <p aria-busy="true">{CHECKING_BACKEND}</p>
                 )}
-                {health.status === "error" && <p>⚠️ Backend unavailable</p>}
+                {health.status === "error" && <p>⚠️ {BACKEND_UNAVAILABLE}</p>}
+                <ReconnectBanner />
                 <WorkerControls />
+                <MetricsPanel />
               </>
             }
           />

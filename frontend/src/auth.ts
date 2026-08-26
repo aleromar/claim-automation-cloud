@@ -1,5 +1,7 @@
 // Session token handling (REQ-4): fragment consumption, sessionStorage, Bearer fetch.
 
+import { AUTH_ERROR_GENERIC, AUTH_ERROR_UNAUTHORIZED } from "./strings";
+
 const TOKEN_KEY = "session_jwt";
 
 /**
@@ -30,9 +32,7 @@ export function consumeFragment(): { error: string | null } {
  * codes.
  */
 export function authErrorMessage(code: string): string {
-  return code === "unauthorized"
-    ? "This account is not authorized."
-    : "Login failed. Please try again.";
+  return code === "unauthorized" ? AUTH_ERROR_UNAUTHORIZED : AUTH_ERROR_GENERIC;
 }
 
 export function getToken(): string | null {

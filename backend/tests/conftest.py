@@ -7,7 +7,14 @@ from core.config import get_settings
 from app.main import app
 from core.secret_store import SESSION_SIGNING_KEY, FileSecretStore, get_store
 from app.security import mint_session_jwt
-from core.state_store import Heartbeat, TrelloConfig, get_state_store
+from core.state_store import (
+    ClaimRecord,
+    ErrorRun,
+    Heartbeat,
+    HistoryTotals,
+    TrelloConfig,
+    get_state_store,
+)
 
 SIGNING_KEY = "k" * 32
 OPERATOR = "operator@example.com"
@@ -27,6 +34,10 @@ class FakeStateStore:
         self.trello = trello
         self.set_calls: list[bool] = []
         self.write_calls: list[TrelloConfig] = []
+        # metrics-dashboard REQ-1/7: seeded by tests, returned verbatim.
+        self.claims: list[ClaimRecord] = []
+        self.totals = HistoryTotals(emails_processed=0, emails_failed=0, failed_runs=0)
+        self.error_runs: list[ErrorRun] = []
 
     def read_enabled(self) -> bool:
         return self.enabled
@@ -47,6 +58,15 @@ class FakeStateStore:
     def write_trello_config(self, config: TrelloConfig) -> None:
         self.write_calls.append(config)
         self.trello = config
+
+    def list_claims(self) -> list[ClaimRecord]:
+        return self.claims
+
+    def history_totals(self) -> HistoryTotals:
+        return self.totals
+
+    def list_error_runs(self) -> list[ErrorRun]:
+        return self.error_runs
 
 
 @pytest.fixture

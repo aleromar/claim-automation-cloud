@@ -114,6 +114,23 @@ class Heartbeat(BaseModel):
     failed_total: int | None = Field(default=None, ge=0)
 
 
+class HistoryTotals(BaseModel):
+    """All-time aggregates over the heartbeat history partition
+    (metrics-dashboard delta REQ-7): one scan, three numbers."""
+
+    emails_processed: int = Field(ge=0)
+    emails_failed: int = Field(ge=0)  # Σ per-run failed — terminal `failed` labels
+    failed_runs: int = Field(ge=0)  # runs that crashed (status=failed, no counts)
+
+
+class ErrorRun(BaseModel):
+    """One history row with failed > 0 — an error event for the dashboard
+    graph (delta REQ-7). Crashed runs carry no counts and never appear here."""
+
+    at: AwareDatetime
+    failed: int = Field(gt=0)
+
+
 class RunCounts(BaseModel):
     """What one pipeline run reports back across the wake contract
     (pipeline-wiring REQ-5): the scheduler maps these onto the heartbeat."""
@@ -143,6 +160,18 @@ class TrelloConfig(BaseModel):
     list_id: str
 
 
+def _to_claim_record(entity: TableEntity) -> ClaimRecord:
+    return ClaimRecord(
+        at=entity[CLAIM_AT_PROP],
+        claim_ref=entity[CLAIM_REF_PROP],
+        subject=entity[CLAIM_SUBJECT_PROP],
+        type=entity[CLAIM_TYPE_PROP],
+        town=entity.get(CLAIM_TOWN_PROP),
+        owner=entity.get(CLAIM_OWNER_PROP),
+        card_url=entity[CLAIM_CARD_URL_PROP],
+    )
+
+
 class StateStore:
     def __init__(self, service: TableServiceClient, table_prefix: str = "") -> None:
         self._service = service
@@ -151,7 +180,10 @@ class StateStore:
         # is shared between the timer thread and FastAPI's threadpool, and every
         # op funnels through the service client's single requests.Session —
         # azure-core's sync RequestsTransport explicitly disclaims thread safety.
-        # At single-operator volume (~ms point ops) serialization costs nothing.
+        # Most ops are ~ms point reads/writes; the metrics partition scans
+        # (list_claims / history_totals / list_error_runs) hold the lock across
+        # their pages — accepted at single-operator volume, revisit trigger in
+        # the metrics-dashboard spec if a years-deep table ever measures slow.
         self._lock = threading.Lock()
 
     def _table(self, name: str) -> TableClient:
@@ -301,15 +333,57 @@ class StateStore:
         )
         if entity is None:
             return None
-        return ClaimRecord(
-            at=entity[CLAIM_AT_PROP],
-            claim_ref=entity[CLAIM_REF_PROP],
-            subject=entity[CLAIM_SUBJECT_PROP],
-            type=entity[CLAIM_TYPE_PROP],
-            town=entity.get(CLAIM_TOWN_PROP),
-            owner=entity.get(CLAIM_OWNER_PROP),
-            card_url=entity[CLAIM_CARD_URL_PROP],
+        return _to_claim_record(entity)
+
+    def list_claims(self) -> list[ClaimRecord]:
+        """All ClaimHistory ledger rows, newest first by `at` (metrics-dashboard
+        REQ-1). RowKey is claim-ref-based, so ordering happens in memory; the
+        lazy pager is materialized INSIDE the lock — continuation-page fetches
+        must not ride the shared transport unserialized (P12, gate C2/M1)."""
+        with self._lock:
+            entities = list(
+                self._table(CLAIM_HISTORY_TABLE).query_entities(
+                    "PartitionKey eq @partition",
+                    parameters={"partition": CLAIM_PARTITION},
+                )
+            )
+        records = [_to_claim_record(entity) for entity in entities]
+        records.sort(key=lambda record: record.at, reverse=True)
+        return records
+
+    def history_totals(self) -> HistoryTotals:
+        """The three all-time aggregates in ONE history scan (delta REQ-7):
+        absent count properties (skips, crashes) contribute 0; failed_runs
+        counts status=failed rows. Same P12 stance: list(...) inside the lock."""
+        with self._lock:
+            entities = list(
+                self._table(HEARTBEAT_TABLE).query_entities(
+                    "PartitionKey eq @partition",
+                    parameters={"partition": HEARTBEAT_HISTORY_PARTITION},
+                )
+            )
+        return HistoryTotals(
+            emails_processed=sum(e.get(HEARTBEAT_PROCESSED_PROP, 0) for e in entities),
+            emails_failed=sum(e.get(HEARTBEAT_FAILED_PROP, 0) for e in entities),
+            failed_runs=sum(
+                1 for e in entities if e.get(HEARTBEAT_STATUS_PROP) == HeartbeatStatus.FAILED.value
+            ),
         )
+
+    def list_error_runs(self) -> list[ErrorRun]:
+        """History rows with failed > 0 — the graph's error events (delta
+        REQ-7). Server-side numeric filter: failed=0 rows and rows lacking the
+        property never transfer (verified against Azurite — delta gate E4)."""
+        with self._lock:
+            entities = list(
+                self._table(HEARTBEAT_TABLE).query_entities(
+                    f"PartitionKey eq @partition and {HEARTBEAT_FAILED_PROP} gt @zero",
+                    parameters={"partition": HEARTBEAT_HISTORY_PARTITION, "zero": 0},
+                )
+            )
+        return [
+            ErrorRun(at=e[HEARTBEAT_AT_PROP], failed=e[HEARTBEAT_FAILED_PROP]) for e in entities
+        ]
 
     def try_acquire_run_lease(self, now: AwareDatetime) -> bool:
         """Cross-process mutual exclusion (REQ-12): insert-if-absent is the

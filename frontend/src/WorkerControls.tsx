@@ -2,20 +2,27 @@ import { useEffect, useState } from "react";
 
 import { apiUrl } from "./api";
 import { authFetch } from "./auth";
+import {
+  ACTION_FAILED,
+  CHECKING_WORKER,
+  countsText,
+  failedGaugeText,
+  LAST_RUN_PREFIX,
+  matchingEmailsText,
+  NEVER_RAN,
+  OUTCOME_LABELS,
+  PROCESS_NOW,
+  RUN_RESULT_PREFIX,
+  type RunOutcome,
+  WORKER_ENABLED_LABEL,
+  WORKER_STATUS_UNAVAILABLE,
+  WORKER_TITLE,
+} from "./strings";
 
-// The closed outcome set (mirrors backend HeartbeatStatus): the exact-key table
-// makes a typo'd, stale, or missing label a compile error. The lookup stays
-// permissive on purpose — an unknown value renders raw; degrade readable,
-// never crash (REQ-4.5).
-type RunOutcome =
-  "ran" | "failed" | "skipped_disabled" | "skipped_no_access" | "skipped_busy";
-const OUTCOME_LABELS: Record<RunOutcome, string> = {
-  ran: "ran",
-  failed: "failed",
-  skipped_disabled: "skipped (worker off)",
-  skipped_no_access: "skipped (Gmail needs reconnect)",
-  skipped_busy: "skipped (another run in progress)",
-};
+// The lookup stays permissive on purpose — an unknown value renders raw;
+// degrade readable, never crash (REQ-4.5). RunOutcome + OUTCOME_LABELS live
+// in strings.ts (frontend-spanish REQ-1.3): the exact-key table there makes a
+// typo'd, stale, or missing label a compile error.
 const outcomeLabel = (outcome: string) =>
   OUTCOME_LABELS[outcome as RunOutcome] ?? outcome;
 
@@ -40,17 +47,16 @@ const lastRunText = (heartbeat: HeartbeatView) => {
   )}`;
   // != null, never truthiness: 0 is a successful, informative run (REQ-10).
   if (heartbeat.processed != null && heartbeat.failed != null) {
-    const counts = `${base} — ${heartbeat.processed} processed, ${heartbeat.failed} failed`;
+    const counts = `${base} — ${countsText(heartbeat.processed, heartbeat.failed)}`;
     if (heartbeat.failed_total == null) return counts;
     const gauge =
       heartbeat.failed_total > GAUGE_CAP
         ? `${GAUGE_CAP}+`
         : `${heartbeat.failed_total}`;
-    return `${counts} · ${gauge} in failed state`;
+    return `${counts} · ${failedGaugeText(gauge)}`;
   }
   if (heartbeat.matched == null) return base;
-  const noun = heartbeat.matched === 1 ? "email" : "emails";
-  return `${base} — ${heartbeat.matched} matching ${noun}`;
+  return `${base} — ${matchingEmailsText(heartbeat.matched)}`;
 };
 // Discriminated union per the structure.md data-fetching pattern: per-state
 // data exists only in its state; render a distinct view for each.
@@ -182,22 +188,22 @@ export default function WorkerControls() {
   if (panel.status === "loading") {
     return (
       <article>
-        <h2>Worker</h2>
-        <p aria-busy="true">Checking worker…</p>
+        <h2>{WORKER_TITLE}</h2>
+        <p aria-busy="true">{CHECKING_WORKER}</p>
       </article>
     );
   }
   if (panel.status === "error") {
     return (
       <article>
-        <h2>Worker</h2>
-        <p role="alert">⚠️ Worker status unavailable</p>
+        <h2>{WORKER_TITLE}</h2>
+        <p role="alert">⚠️ {WORKER_STATUS_UNAVAILABLE}</p>
       </article>
     );
   }
   return (
     <article>
-      <h2>Worker</h2>
+      <h2>{WORKER_TITLE}</h2>
       <label>
         <input
           type="checkbox"
@@ -206,20 +212,24 @@ export default function WorkerControls() {
           onChange={() => toggle(!panel.enabled)}
           disabled={busy}
         />
-        Worker enabled
+        {WORKER_ENABLED_LABEL}
       </label>
       <p>
-        Last run: {panel.heartbeat ? lastRunText(panel.heartbeat) : "never"}
+        {LAST_RUN_PREFIX}{" "}
+        {panel.heartbeat ? lastRunText(panel.heartbeat) : NEVER_RAN}
       </p>
       <p>
         <button onClick={processNow} disabled={busy} aria-busy={busy}>
-          Process now
+          {PROCESS_NOW}
         </button>
         {runOutcome !== null && (
-          <span> Run result: {outcomeLabel(runOutcome)}</span>
+          <span>
+            {" "}
+            {RUN_RESULT_PREFIX} {outcomeLabel(runOutcome)}
+          </span>
         )}
       </p>
-      {actionFailed && <p role="alert">⚠️ Action failed — status refreshed</p>}
+      {actionFailed && <p role="alert">⚠️ {ACTION_FAILED}</p>}
     </article>
   );
 }

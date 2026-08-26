@@ -31,7 +31,9 @@ export const restoreSecret = (name: string, value: string | undefined) => {
 /** Sign in through the stub IdP and wait for the authed shell. */
 export const login = async (page: Page) => {
   await page.goto("/");
-  await page.getByRole("link", { name: /sign in with google/i }).click();
+  await page.getByRole("link", { name: /iniciar sesión con google/i }).click();
+  // "Approve" is the stub IdP's own page text (test infra, not product UI) —
+  // stays English.
   await page.getByRole("link", { name: "Approve", exact: true }).click();
   await expect(page.getByText(OPERATOR)).toBeVisible();
 };

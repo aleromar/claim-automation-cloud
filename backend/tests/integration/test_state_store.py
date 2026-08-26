@@ -24,6 +24,7 @@ from core.state_store import (
     WORKER_STATE_TABLE,
     Heartbeat,
     HeartbeatStatus,
+    HistoryTotals,
     StateStore,
     TrelloConfig,
     state_store_from_settings,
@@ -330,6 +331,94 @@ def test_run_lease_single_winner_under_concurrency(store):
         results = list(executor.map(lambda _: store.try_acquire_run_lease(now), range(8)))
     assert results.count(True) == 1
     store.release_run_lease()
+
+
+# --- metrics-dashboard (item 6): claim listing + emails-processed sum ---
+
+
+def test_list_claims_empty_reads_empty_list(store):
+    assert store.list_claims() == []
+
+
+def test_list_claims_sorted_newest_first(store):
+    # RowKey is claim-ref-based, not time-ordered — the store must sort by `at`
+    # (metrics-dashboard REQ-1). `at` order deliberately DISAGREES with RowKey
+    # order in both directions (Gate 3 W4): a RowKey-ordered result, ascending
+    # or descending, fails this assertion.
+    base = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)
+    for ref, offset in (("2026/1", 2), ("2026/2", 0), ("2026/3", 1)):
+        record = _record(claim_ref=ref)
+        store.record_claim(record.model_copy(update={"at": base + timedelta(hours=offset)}))
+    assert [r.claim_ref for r in store.list_claims()] == ["2026/1", "2026/3", "2026/2"]
+
+
+def test_history_totals_ignores_last_run_row(store):
+    # The aggregates read the history partition only — the REPLACE'd last-run
+    # row would double-count the newest run if it leaked into the scan.
+    store.write_heartbeat(Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN, processed=4))
+    assert store.history_totals().emails_processed == 4  # not 8
+
+
+# --- metrics-dashboard delta: error counters + error-run events ---
+
+
+def test_history_totals_aggregates_mixed_rows(store):
+    # One scan, three aggregates (delta REQ-7): count-less skip/crash rows
+    # contribute 0 to the sums; failed_runs counts only status=failed rows.
+    now = datetime.now(UTC).replace(microsecond=0)
+    store.write_heartbeat(
+        Heartbeat(at=now, status=HeartbeatStatus.RAN, processed=3, failed=1, failed_total=2)
+    )
+    store.write_heartbeat(Heartbeat(at=now, status=HeartbeatStatus.SKIPPED_DISABLED))
+    store.write_heartbeat(Heartbeat(at=now, status=HeartbeatStatus.FAILED))
+    store.write_heartbeat(Heartbeat(at=now, status=HeartbeatStatus.RAN, processed=2, failed=0))
+    store.write_heartbeat(Heartbeat(at=now, status=HeartbeatStatus.SKIPPED_NO_ACCESS))
+    assert store.history_totals() == HistoryTotals(
+        emails_processed=5, emails_failed=1, failed_runs=1
+    )
+
+
+def test_history_totals_empty_partition(store):
+    assert store.history_totals() == HistoryTotals(
+        emails_processed=0, emails_failed=0, failed_runs=0
+    )
+
+
+def test_list_error_runs_excludes_zero_and_absent_failed(store):
+    # Delta gate E4 verification vehicle: the server-side numeric filter must
+    # exclude BOTH explicit failed=0 rows and rows lacking the property.
+    now = datetime.now(UTC).replace(microsecond=0)
+    store.write_heartbeat(Heartbeat(at=now, status=HeartbeatStatus.RAN, processed=2, failed=0))
+    store.write_heartbeat(Heartbeat(at=now, status=HeartbeatStatus.FAILED))  # no counts
+    at_err = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)
+    store.write_heartbeat(Heartbeat(at=at_err, status=HeartbeatStatus.RAN, processed=1, failed=2))
+    assert [(run.at, run.failed) for run in store.list_error_runs()] == [(at_err, 2)]
+
+
+def test_list_error_runs_empty_partition(store):
+    assert store.list_error_runs() == []
+
+
+def test_metrics_reads_safe_under_concurrent_use(store):
+    # P12 guard for the new query methods: the lazy ItemPaged must be fully
+    # materialized inside the store lock (gate C2/M1) — mixed with writes from
+    # other threads, gross breakage of the shared transport shows up here.
+    def hammer(worker_index: int) -> int:
+        for n in range(10):
+            store.record_claim(_record(claim_ref=f"2026/9{worker_index}{n}"))
+            store.write_heartbeat(
+                Heartbeat(at=datetime.now(UTC), status=HeartbeatStatus.RAN, processed=1)
+            )
+            assert len(store.list_claims()) >= 1
+            assert store.history_totals().emails_processed >= 1
+        return worker_index
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        assert sorted(executor.map(hammer, range(8))) == list(range(8))
+    # Exact post-conditions (Gate 3 W4): a lost or double-counted row under
+    # contention must fail, not just gross transport breakage.
+    assert len(store.list_claims()) == 80
+    assert store.history_totals().emails_processed == 80
 
 
 def test_new_accessors_safe_under_concurrent_use(store):

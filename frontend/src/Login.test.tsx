@@ -3,18 +3,24 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import Login from "./Login";
+import {
+  AUTH_ERROR_GENERIC,
+  AUTH_ERROR_UNAUTHORIZED,
+  BACKEND_UNAVAILABLE,
+  SIGN_IN_WITH_GOOGLE,
+} from "./strings";
 
 describe("Login", () => {
   it("links 'Sign in with Google' to the backend login route (REQ-1.1)", () => {
     render(<Login error={null} />);
-    const link = screen.getByRole("link", { name: /sign in with google/i });
+    const link = screen.getByRole("link", { name: SIGN_IN_WITH_GOOGLE });
     expect(link).toHaveAttribute("href", "/api/auth/login");
   });
 
   it("shows no dashboard data and no error by default", () => {
     render(<Login error={null} />);
     expect(
-      screen.queryByText(/all good|backend unavailable/i),
+      screen.queryByText(new RegExp(BACKEND_UNAVAILABLE, "i")),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -22,12 +28,12 @@ describe("Login", () => {
   it("shows 'not authorized' for the unauthorized error (REQ-4.4)", () => {
     render(<Login error="unauthorized" />);
     expect(screen.getByRole("alert")).toHaveTextContent(
-      /this account is not authorized/i,
+      AUTH_ERROR_UNAUTHORIZED,
     );
   });
 
   it("shows a generic message for other errors (REQ-4.4)", () => {
     render(<Login error="login_failed" />);
-    expect(screen.getByRole("alert")).toHaveTextContent(/login failed/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(AUTH_ERROR_GENERIC);
   });
 });

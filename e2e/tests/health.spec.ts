@@ -4,9 +4,9 @@ import { expect, test } from "@playwright/test";
 // shows the login screen; backend liveness is asserted on the API directly.
 test("unauthenticated visit shows the login screen, no dashboard data", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("link", { name: /sign in with google/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /iniciar sesión con google/i })).toBeVisible();
   await expect(
-    page.getByRole("switch", { name: /worker enabled/i }),
+    page.getByRole("switch", { name: /proceso activado/i }),
   ).not.toBeVisible();
 });
 
