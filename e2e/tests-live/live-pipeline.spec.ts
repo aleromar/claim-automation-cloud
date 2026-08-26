@@ -10,7 +10,7 @@ import { injectSession, mintSessionJwt } from "./helpers/session";
 import { TrelloLive } from "./helpers/trello";
 
 // Live smoke (live-e2e REQ-1/2): ALL SIX claim types through the REAL pipeline
-// in one batch run — real Gmail, real Trello, local stack. Lifecycle:
+// in one batch run — real Gmail, real Trello, deployed staging. Lifecycle:
 // sweep → mint refs (per attempt) → seed 6 → poll searchable → settings →
 // worker ON (UI) → Process now → assert UI + per-type Trello + Gmail → teardown.
 // The comunicación email reuses the declaración's ref and is seeded LAST:
@@ -53,7 +53,7 @@ test.afterEach(async () => {
     // Guarded: a pre-mint failure means the worker was never touched, and an
     // unset jwt here would 401 and mask the real error (Gate 3 #3).
     try {
-      await setWorkerEnabled(jwt, false); // fail-safe for the shared local Azurite
+      await setWorkerEnabled(jwt, false); // fail-safe for the shared staging env
     } catch (error) {
       failures.push(`worker OFF: ${String(error)}`);
     }

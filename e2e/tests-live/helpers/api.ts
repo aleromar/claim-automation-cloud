@@ -1,10 +1,11 @@
 // Backend API calls the live suite makes outside the browser: Trello settings
 // seeding (the real operator write path — settings_routes.py POST /trello) and
 // the worker-OFF teardown fail-safe (robust even when the UI is wedged).
+// Targets the deployed staging function app (staging-environment REQ-4.1).
 
 import { requireLiveEnv } from "./env";
 
-const BACKEND = "http://localhost:8000/api";
+const BACKEND = requireLiveEnv().LIVE_BACKEND_API_URL;
 
 async function authedPost(jwt: string, path: string, body: unknown): Promise<void> {
   const res = await fetch(`${BACKEND}${path}`, {
