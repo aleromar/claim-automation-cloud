@@ -1,4 +1,4 @@
-.PHONY: install dev env-check env-live-check seed-dev test lint e2e e2e-live azurite backend-test frontend-test backend-lint frontend-lint
+.PHONY: install dev env-check seed-dev test lint e2e azurite backend-test frontend-test backend-lint frontend-lint
 
 # Install dependencies for both stacks.
 install:
@@ -88,12 +88,6 @@ frontend-lint:
 e2e: azurite
 	cd e2e && npx playwright test
 
-# LIVE end-to-end (live-e2e spec): real Gmail dev account + real Trello test board.
-# Credentials from e2e/.env.live (gitignored). Don't run while a main push's CI
-# live run is in flight — both share the one real mailbox (spec: mutual exclusion).
-# env checked BEFORE azurite (same rule as env-check: error before Docker spins up).
-env-live-check:
-	@test -f e2e/.env.live || { echo "ERROR: e2e/.env.live missing — cp e2e/.env.live.example e2e/.env.live and fill it in"; exit 1; }
-
-e2e-live: env-live-check azurite
-	cd e2e && set -a && . ./.env.live && set +a && npx playwright test -c playwright.live.config.ts
+# The LIVE suite is CI-only (staging-environment REQ-4): it runs in the deploy
+# workflow against the deployed staging environment. There is no local target —
+# for an ad-hoc live run, re-dispatch the deploy workflow.
