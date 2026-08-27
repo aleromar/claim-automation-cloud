@@ -29,7 +29,7 @@ DATE = "2026-08-27"
 def _query_json(rows: list, columns: list[str] | None = None) -> dict:
     """az CLI result shape: {"tables":[{"columns":[{"name":..}],"rows":[..]}]}."""
     names = columns or ["timestamp", "itemType", "severityLevel", "message", "details"]
-    return {"tables": [{"columns": [{"name": n, "type": "dynamic"} for n in names], "rows": rows}]}
+    return {"tables": [{"columns": [{"name": n} for n in names], "rows": rows}]}
 
 
 def _heartbeat(count: int) -> dict:
@@ -175,6 +175,89 @@ def test_truncation_is_fence_safe():
     assert body.count("```") % 2 == 0  # never cut inside a fence
     assert "truncated" in body.lower()
     assert "OOM in pdf_gen" in body
+
+
+# --- Gate 3 fixes (2026-08-27) ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [{}, {"tables": []}, {"tables": None}, {"error": {"code": "BadRequest"}}],
+)
+def test_malformed_query_json_raises_instead_of_clean_night(malformed):
+    # Gate 3 C1: an unexpected az payload must fail LOUDLY (workflow fails ->
+    # GitHub email), never read as "no failures tonight".
+    with pytest.raises(ValueError):
+        build_result(malformed, _heartbeat(40), DATE)
+
+
+def test_genuinely_empty_rows_is_still_a_clean_night():
+    result = build_result(_query_json([]), _heartbeat(40), DATE)
+    assert result["action"] == ACTION_NONE
+
+
+def test_embedded_backtick_fences_stay_balanced():
+    # Gate 3 W3: a stack trace containing ``` must not close our fence early.
+    details = "Traceback:\n```\nsneaky embedded fence\nmore lines"
+    rows = [["2026-08-27T03:00:00Z", "exception", 3, "doc-string crash", details]]
+    body = build_result(_query_json(rows), _heartbeat(40), DATE)["body"]
+    assert "````" in body  # wrapping fence is longer than any run inside
+    assert body.count("````") == 2
+
+
+def test_huge_message_does_not_wipe_the_digest():
+    # Gate 3 W4: an unbounded group-header message must not starve every
+    # other group out of the body.
+    rows = [
+        _trace("2026-08-27T01:00:00Z", 2, "lorem ipsum " * 6000),
+        _trace("2026-08-27T02:00:00Z", 3, "small but important error"),
+    ]
+    body = build_result(_query_json(rows), _heartbeat(40), DATE)["body"]
+    assert "small but important error" in body
+    assert max(len(line) for line in body.splitlines()) < 500
+
+
+def test_first_last_use_time_order_not_string_order():
+    # Gate 3 W5: "30.68Z" < "30.685Z" temporally, but not as strings.
+    rows = [
+        _trace("2026-08-27T07:29:30.685Z", 2, "same failure"),
+        _trace("2026-08-27T07:29:30.68Z", 2, "same failure"),
+    ]
+    body = build_result(_query_json(rows), _heartbeat(40), DATE)["body"]
+    assert "first: `2026-08-27T07:29:30.68Z`" in body
+    assert "last: `2026-08-27T07:29:30.685Z`" in body
+
+
+def test_group_keeps_the_richest_details():
+    # Gate 3 W6: first occurrence without a trace must not shadow a later
+    # occurrence that carries one.
+    rows = [
+        ["2026-08-27T01:00:00Z", "trace", 2, "flaky call failed", ""],
+        ["2026-08-27T02:00:00Z", "trace", 2, "flaky call failed", "Traceback: the good stuff"],
+    ]
+    body = build_result(_query_json(rows), _heartbeat(40), DATE)["body"]
+    assert "the good stuff" in body
+
+
+def test_null_severity_exception_orders_above_warning():
+    rows = [
+        _trace("2026-08-27T01:00:00Z", 2, "warning noise"),
+        ["2026-08-27T02:00:00Z", "exception", None, "real crash", "Traceback"],
+    ]
+    body = build_result(_query_json(rows), _heartbeat(40), DATE)["body"]
+    assert body.index("real crash") < body.index("warning noise")
+
+
+def test_acronyms_and_letter_only_hex_words_survive_normalization():
+    # Gate 3 S7: UTF-8 / SHA-1 are not claim refs; a hex-alphabet word with no
+    # digit is a word, not an id.
+    normalized = normalize_message(
+        "UTF-8 decode failed in SHA-1 helper: interface CAFEBABEDEADBEEF"
+    )
+    assert "UTF-8" in normalized
+    assert "SHA-1" in normalized
+    # An actual id (contains digits) is still stripped:
+    assert "<id>" in normalize_message("id 18a9f2c3b4d5e6f7 rejected")
 
 
 # --- CLI contract (the workflow's interface) ---------------------------------

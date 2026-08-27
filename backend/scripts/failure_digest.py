@@ -22,17 +22,25 @@ BODY_LIMIT: Final = 65536
 TOP_GROUPS: Final = 20
 # Per-group stack-trace budget once the body overflows (first shrink step).
 DETAILS_CAP: Final = 4000
+# Group-header cap: one unbounded message must not starve the other groups
+# out of the body (App Insights messages run to 32 KB).
+MESSAGE_CAP: Final = 300
 TRUNCATION_MARK: Final = "… [truncated]"
 
 _SEVERITY_LABELS: Final = {4: "CRITICAL", 3: "ERROR", 2: "WARNING", 1: "INFO", 0: "DEBUG"}
 
-_EMAIL_RE: Final = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+# Local part bounded to 64 chars (RFC limit): the open-ended original was
+# O(n²) on long @-less messages — 2 s at App Insights' 32 KB message cap.
+_EMAIL_RE: Final = re.compile(r"[\w.+-]{1,64}@[\w-]+\.[\w.-]+")
 _UUID_RE: Final = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
-_HEX_ID_RE: Final = re.compile(r"\b[0-9a-fA-F]{12,}\b")
+# The digit lookahead keeps hex-alphabet WORDS (CAFEBABEDEADBEEF, "interface
+# ABCDEF...") out of the id bucket; real ids virtually always carry a digit.
+_HEX_ID_RE: Final = re.compile(r"\b(?=[0-9a-fA-F]*\d)[0-9a-fA-F]{12,}\b")
 _URL_RE: Final = re.compile(r"https?://\S+")
-_REF_RE: Final = re.compile(r"\b[A-Z]{2,}-\d+\b")
+# 3+ digits: claim refs (CLM-0042), not acronyms (UTF-8, SHA-1).
+_REF_RE: Final = re.compile(r"\b[A-Z]{2,}-\d{3,}\b")
 # raise_for_status_logged shape: "HTTP 500 from GET <url>: <=500-char body snippet".
 # Matched on the RAW message (before URL substitution — the URL regex would
 # otherwise swallow the delimiting colon along with the query string).
@@ -42,7 +50,8 @@ _HTTP_BODY_RE: Final = re.compile(r"(HTTP \d+ from \w+ )\S+:\s.*", re.DOTALL)
 def normalize_message(message: str) -> str:
     """Collapse the volatile parts of a log message into a stable group key."""
     normalized = _HTTP_BODY_RE.sub(r"\1<url>: <body>", message)
-    normalized = _EMAIL_RE.sub("<email>", normalized)
+    if "@" in normalized:
+        normalized = _EMAIL_RE.sub("<email>", normalized)
     normalized = _UUID_RE.sub("<id>", normalized)
     normalized = _HEX_ID_RE.sub("<id>", normalized)
     normalized = _URL_RE.sub("<url>", normalized)
@@ -51,11 +60,24 @@ def normalize_message(message: str) -> str:
 
 
 def _rows_as_dicts(query: dict[str, Any]) -> list[dict[str, Any]]:
-    tables = query.get("tables") or []
-    if not tables:
-        return []
+    # Strict on shape: an unexpected az payload (error body, wrong file) must
+    # fail LOUDLY — the workflow failure emails the operator — never read as a
+    # clean night. Only a well-formed table with zero rows means "no events".
+    tables = query.get("tables")
+    if not isinstance(tables, list) or not tables:
+        raise ValueError(f"unexpected az query result shape (no tables): {str(query)[:200]}")
+    rows = tables[0].get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("unexpected az query result shape: tables[0].rows is not a list")
     names = [column["name"] for column in tables[0]["columns"]]
-    return [dict(zip(names, row)) for row in tables[0]["rows"]]
+    return [dict(zip(names, row)) for row in rows]
+
+
+def _ts_key(timestamp: str) -> tuple[str, str]:
+    """Chronological sort key: az emits ISO-8601 Z with VARIABLE fraction width,
+    so plain string comparison inverts e.g. 30.685Z vs 30.68Z."""
+    base, dot, fraction = timestamp.rstrip("Z").partition(".")
+    return (base, fraction.ljust(9, "0") if dot else "0" * 9)
 
 
 def _heartbeat_count(query: dict[str, Any]) -> int:
@@ -96,21 +118,32 @@ def _group(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             },
         )
         group["count"] += 1
-        group["first"] = min(group["first"], row["timestamp"])
-        group["last"] = max(group["last"], row["timestamp"])
+        group["first"] = min(group["first"], row["timestamp"], key=_ts_key)
+        group["last"] = max(group["last"], row["timestamp"], key=_ts_key)
+        # Keep the richest trace: the first occurrence may have arrived bare.
+        details = row.get("details") or ""
+        if len(details) > len(group["details"]):
+            group["details"] = details
     return sorted(groups.values(), key=lambda g: (-g["severity"], -g["count"]))
 
 
 def _render_group(group: dict[str, Any], details_cap: int | None) -> str:
+    message = group["message"]
+    if len(message) > MESSAGE_CAP:
+        message = message[:MESSAGE_CAP] + TRUNCATION_MARK
     lines = [
-        f"### {group['label']} x{group['count']} — {group['message']}",
+        f"### {group['label']} x{group['count']} — {message}",
         f"- first: `{group['first']}` — last: `{group['last']}` (UTC)",
     ]
     details = group["details"]
     if details:
         if details_cap is not None and len(details) > details_cap:
             details = details[:details_cap] + "\n" + TRUNCATION_MARK
-        lines.append(f"```\n{details}\n```")
+        # The fence must outrun any backtick run inside the trace, or an
+        # embedded ``` closes our block early / unbalances the body.
+        longest_run = max((len(m.group()) for m in re.finditer(r"`+", details)), default=0)
+        fence = "`" * max(3, longest_run + 1)
+        lines.append(f"{fence}\n{details}\n{fence}")
     return "\n".join(lines)
 
 
@@ -131,16 +164,16 @@ def _render_body(groups: list[dict[str, Any]], heartbeat: int) -> str:
         if len(body) <= BODY_LIMIT:
             return body
     # Last resort: drop trailing groups until the body fits (fences stay balanced
-    # because whole groups are removed, never sliced).
-    while shown:
-        shown = shown[:-1]
-        dropped = len(groups) - len(shown)
-        parts_rendered = parts + [_render_group(g, 500) for g in shown]
+    # because whole groups are removed, never sliced). With MESSAGE_CAP bounding
+    # every header, the zero-group floor always fits.
+    for keep in range(len(shown) - 1, -1, -1):
+        dropped = len(groups) - keep
+        parts_rendered = parts + [_render_group(g, 500) for g in shown[:keep]]
         parts_rendered.append(f"…{dropped} groups {TRUNCATION_MARK}")
         body = "\n\n".join(parts_rendered)
         if len(body) <= BODY_LIMIT:
             return body
-    return TRUNCATION_MARK
+    return "\n\n".join(parts + [f"…{len(groups)} groups {TRUNCATION_MARK}"])
 
 
 def build_result(
@@ -159,14 +192,12 @@ def build_result(
                     "logs are visible — telemetry may be dead (broken connection "
                     "string, recreated App Insights resource, stopped app)."
                 ),
-                "events": 0,
             }
-        return {"action": ACTION_NONE, "title": None, "body": None, "events": 0}
+        return {"action": ACTION_NONE, "title": None, "body": None}
     return {
         "action": ACTION_DIGEST,
         "title": f"[auto] Backend failures {date} ({len(rows)} events)",
         "body": _render_body(_group(rows), heartbeat),
-        "events": len(rows),
     }
 
 
