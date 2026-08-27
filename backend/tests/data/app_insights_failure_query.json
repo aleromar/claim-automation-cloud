@@ -1,0 +1,45 @@
+{
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "timestamp",
+          "type": "datetime"
+        },
+        {
+          "name": "itemType",
+          "type": "string"
+        },
+        {
+          "name": "severityLevel",
+          "type": "int"
+        },
+        {
+          "name": "message",
+          "type": "string"
+        },
+        {
+          "name": "details",
+          "type": "string"
+        }
+      ],
+      "name": "PrimaryResult",
+      "rows": [
+        [
+          "2026-08-27T07:29:30.6858949Z",
+          "trace",
+          2,
+          "callback rejected: invalid or expired state",
+          ""
+        ],
+        [
+          "2026-08-26T10:07:26.1545587Z",
+          "trace",
+          2,
+          "No job functions found. Try making your job classes and methods public. If you're using binding extensions (e.g. Azure Storage, ServiceBus, Timers, etc.) make sure you've called the registration method for the extension(s) in your startup code (e.g. builder.AddAzureStorage(), builder.AddServiceBus(), builder.AddTimers(), etc.).",
+          ""
+        ]
+      ]
+    }
+  ]
+}
