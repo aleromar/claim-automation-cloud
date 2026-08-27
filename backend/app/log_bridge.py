@@ -8,6 +8,10 @@ user-created threads); anyio copies contextvars into its threadpool, so a
 ContextVar set per request makes both reachable from the emitting thread,
 where a handler-level filter stamps the ID just before the worker's handler
 serializes the record.
+
+Stamps are never cleared: a stale ID on a reused threadpool thread references
+a no-longer-executing invocation, which the host drops — the pre-bridge status
+quo, never misattribution (spec residuals).
 """
 
 import logging
@@ -62,15 +66,16 @@ class InvocationIdFilter(logging.Filter):
             if ctx is not None:
                 invocation_id, thread_local = ctx
                 thread_local.invocation_id = invocation_id
-        except Exception:  # noqa: BLE001 — see docstring
+        except Exception:  # deliberately broad — see docstring
             pass
         return True
 
 
 def install_log_bridge() -> None:
     """Attach the filter to the root logger's handlers. Handler-level on
-    purpose: logger-level filters do not run for propagated records. Called
-    only from function_app.py — under uvicorn the bridge stays uninstalled."""
+    purpose: logger-level filters do not run for propagated records. The
+    production call site is function_app.py only — under uvicorn the bridge
+    stays uninstalled."""
     for handler in logging.getLogger().handlers:
         if not any(isinstance(f, InvocationIdFilter) for f in handler.filters):
             handler.addFilter(InvocationIdFilter())

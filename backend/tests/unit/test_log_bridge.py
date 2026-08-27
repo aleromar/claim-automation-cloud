@@ -125,6 +125,61 @@ def test_filter_leaves_tls_alone_outside_requests() -> None:
     assert capture.seen == ["platform-set"]
 
 
+def test_concurrent_requests_keep_distinct_ids() -> None:
+    # Two overlapping invocations on one event loop: each threadpool-emitted
+    # record must carry its own request's id — a plain global instead of the
+    # ContextVar would bleed one request's id into the other's records.
+    tls = threading.local()
+    capture = TlsCaptureHandler(tls)
+    capture.addFilter(InvocationIdFilter())
+    logger.addHandler(capture)
+    try:
+        started = asyncio.Event()
+
+        async def downstream(scope, receive, send) -> None:
+            if scope[INVOCATION_ID_SCOPE_KEY] == "inv-a":
+                started.set()  # guarantee overlap: A yields until B has begun
+                await asyncio.sleep(0.05)
+            else:
+                await started.wait()
+            await anyio.to_thread.run_sync(
+                lambda: logger.info("from %s", scope[INVOCATION_ID_SCOPE_KEY])
+            )
+
+        middleware = InvocationContextMiddleware(downstream)
+
+        async def run() -> None:
+            await asyncio.gather(
+                middleware(_functions_scope("inv-a", tls), _noop_receive, _noop_send),
+                middleware(_functions_scope("inv-b", tls), _noop_receive, _noop_send),
+            )
+
+        asyncio.run(run())
+    finally:
+        logger.removeHandler(capture)
+    assert sorted(capture.seen) == ["inv-a", "inv-b"]
+
+
+def test_context_reset_when_downstream_raises() -> None:
+    # A 500 must not leak the request context: a leaked ctx would let the
+    # filter clobber the timer path's platform-set id (REQ-2's scenario).
+    tls = threading.local()
+
+    async def downstream(scope, receive, send) -> None:
+        raise RuntimeError("route exploded")
+
+    middleware = InvocationContextMiddleware(downstream)
+
+    async def run() -> None:
+        try:
+            await middleware(_functions_scope("inv-boom", tls), _noop_receive, _noop_send)
+        except RuntimeError:
+            pass
+        assert _invocation_ctx.get() is None
+
+    asyncio.run(run())
+
+
 def test_filter_never_raises() -> None:
     # Filterer.filter has no stdlib exception guard: a raising filter would
     # surface in every logger.* call app-wide (gate F1). Broken tls -> pass.
@@ -143,11 +198,14 @@ def test_filter_never_raises() -> None:
 def test_install_is_idempotent_and_handler_level() -> None:
     root = logging.getLogger()
     sentinel = logging.NullHandler()
-    root.addHandler(sentinel)
+    original_handlers = root.handlers[:]
+    root.handlers = [sentinel]  # isolated: pytest's own handlers must not gain the filter
     try:
         install_log_bridge()
         install_log_bridge()
         bridge_filters = [f for f in sentinel.filters if isinstance(f, InvocationIdFilter)]
         assert len(bridge_filters) == 1
+        # Handler-level, not logger-level: logger filters skip propagated records.
+        assert not any(isinstance(f, InvocationIdFilter) for f in root.filters)
     finally:
-        root.removeHandler(sentinel)
+        root.handlers = original_handlers

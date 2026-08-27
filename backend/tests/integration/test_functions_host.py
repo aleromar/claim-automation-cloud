@@ -203,16 +203,40 @@ def _wait_for_heartbeat(store: StateStore, after: datetime) -> Heartbeat:
     pytest.fail(f"no fresh heartbeat within {HEARTBEAT_TIMEOUT_S}s (invoked at {after})")
 
 
-def _wait_for_log_count(log_path: Path, needle: str, minimum: int, timeout_s: float = 20) -> int:
+def _log_count(log_path: Path, needle: str) -> int:
+    return log_path.read_text(encoding="utf-8", errors="replace").count(needle)
+
+
+def _wait_for_log_count(log_path: Path, needle: str, minimum: int, timeout_s: float = 20) -> None:
     """Poll the host console log until `needle` appears >= `minimum` times.
     Polled, not read once: worker→gRPC→host→stdout forwarding is asynchronous."""
     deadline = time.monotonic() + timeout_s
     count = 0
     while time.monotonic() < deadline:
-        count = log_path.read_text().count(needle)
+        count = _log_count(log_path, needle)
         if count >= minimum:
-            return count
+            return
         time.sleep(0.5)
+    pytest.fail(f"{needle!r}: {count} occurrence(s) in host log after {timeout_s}s, need {minimum}")
+
+
+def _drained_log_count(
+    log_path: Path, needle: str, settle_s: float = 2, timeout_s: float = 15
+) -> int:
+    """Count occurrences once the log has gone quiet: in-flight lines from
+    earlier invocations must land BEFORE a before/after comparison samples
+    its baseline, or a late arrival fakes the +1 (Gate 3 #1)."""
+    deadline = time.monotonic() + timeout_s
+    count = _log_count(log_path, needle)
+    settled_at = time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        fresh = _log_count(log_path, needle)
+        if fresh != count:
+            count = fresh
+            settled_at = time.monotonic()
+        elif time.monotonic() - settled_at >= settle_s:
+            return count
     return count
 
 
@@ -244,7 +268,7 @@ def test_timer_wake_enabled_without_gmail_creds_writes_skipped_no_access(
     assert heartbeat.matched is None
 
 
-def test_http_route_log_reaches_host_console(functions_host, store, clean_worker_state):
+def test_http_route_log_reaches_host_console(functions_host, clean_worker_state):
     # log-bridge REQ-1: a plain-def route's log record (emitted in anyio's
     # threadpool) must be accepted by the host — visible in its console log.
     # Without the bridge the host silently discards it (root-caused 2026-08-26).
@@ -253,13 +277,16 @@ def test_http_route_log_reaches_host_console(functions_host, store, clean_worker
         follow_redirects=False,
         timeout=10,
     )
-    assert response.status_code == 302  # the warning branch provably executed
+    # All callback failure paths 302; WHICH branch ran is proven by the log
+    # line itself — the assertion below is the point of the test.
+    assert response.status_code == 302
     route_line = "callback rejected: invalid or expired state"
-    assert _wait_for_log_count(functions_host.log_path, route_line, minimum=1) >= 1
+    _wait_for_log_count(functions_host.log_path, route_line, minimum=1)
 
     # log-bridge REQ-2: the timer path's platform-set attribution must survive
-    # the bridge — count-based so earlier tests' worker wakes can't fake a pass.
+    # the bridge in the real host. Drained baseline: earlier tests' wakes log
+    # AFTER their heartbeat proof, so a line can still be in flight here.
     worker_line = "worker_run outcome="
-    before = functions_host.log_path.read_text().count(worker_line)
+    before = _drained_log_count(functions_host.log_path, worker_line)
     _invoke_worker(functions_host.base_url)
-    assert _wait_for_log_count(functions_host.log_path, worker_line, minimum=before + 1) > before
+    _wait_for_log_count(functions_host.log_path, worker_line, minimum=before + 1)

@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.auth_routes import router as auth_router
-from app.log_bridge import InvocationContextMiddleware
 from core.config import get_settings
 from core.secret_store import (
     GOOGLE_CLIENT_SECRET,
@@ -47,9 +46,6 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="claim-automation-cloud", lifespan=lifespan)
-# Unconditional: reads azure_functions.* ASGI scope keys, absent under uvicorn,
-# so dev/e2e see a passthrough (http-log-bridge REQ-3).
-app.add_middleware(InvocationContextMiddleware)
 app.include_router(auth_router)
 app.include_router(worker_router)
 app.include_router(settings_router)
