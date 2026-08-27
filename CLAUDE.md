@@ -16,6 +16,11 @@ Authoritative project context lives in `.specs/steering/` — read before any wo
 
 Per-feature specs live in `.specs/{feature}/` (e.g. `.specs/walking-skeleton/spec.md`).
 
+**Backlog/roadmap** lives on the GitHub Project board of the private ops repo
+(`claim-automation-roadmap` — issues + board are authoritative since 2026-08-27; the
+former `.specs/roadmap.md` is archived verbatim as issue #8 there). Nightly failure
+digests land on the same board (`auto-error` label, error-issues spec / D27).
+
 ## Conventions in one breath
 
 - **TDD-first**: RED → GREEN → REFACTOR. No implementation without a failing test.
