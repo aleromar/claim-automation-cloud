@@ -20,6 +20,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx
 import pytest
@@ -88,9 +89,16 @@ def clean_worker_state(store: StateStore):
         _delete_row(service, HEARTBEAT_TABLE, HEARTBEAT_PARTITION, HEARTBEAT_ROW)
 
 
+class FunctionsHost(NamedTuple):
+    base_url: str
+    log_path: Path
+
+
 @pytest.fixture(scope="module")
 def functions_host(tmp_path_factory, azurite_connection_string):
-    """`func start` on a probed free port; yields the host's base URL (str)."""
+    """`func start` on a probed free port; yields a FunctionsHost — the console
+    log is an assertion target too (log-bridge REQ-1: host-accepted user logs
+    are printed there, dropped ones are not)."""
     if shutil.which("func") is None:
         pytest.fail(FUNC_INSTALL_HINT)
 
@@ -131,7 +139,7 @@ def functions_host(tmp_path_factory, azurite_connection_string):
         )
         try:
             _wait_until_indexed(base_url, proc, log_path)
-            yield base_url
+            yield FunctionsHost(base_url, log_path)
         finally:
             # start_new_session=True makes proc.pid the process-group ID; the
             # group can outlive the (already-reaped) leader, so signal the group
@@ -195,14 +203,53 @@ def _wait_for_heartbeat(store: StateStore, after: datetime) -> Heartbeat:
     pytest.fail(f"no fresh heartbeat within {HEARTBEAT_TIMEOUT_S}s (invoked at {after})")
 
 
+def _log_count(log_path: Path, needle: str) -> int:
+    return log_path.read_text(encoding="utf-8", errors="replace").count(needle)
+
+
+def _wait_for_log_count(log_path: Path, needle: str, minimum: int, timeout_s: float = 20) -> None:
+    """Poll the host console log until `needle` appears >= `minimum` times.
+    Polled, not read once: worker→gRPC→host→stdout forwarding is asynchronous."""
+    deadline = time.monotonic() + timeout_s
+    count = 0
+    while time.monotonic() < deadline:
+        count = _log_count(log_path, needle)
+        if count >= minimum:
+            return
+        time.sleep(0.5)
+    pytest.fail(f"{needle!r}: {count} occurrence(s) in host log after {timeout_s}s, need {minimum}")
+
+
+def _drained_log_count(
+    log_path: Path, needle: str, settle_s: float = 2, timeout_s: float = 15
+) -> int:
+    """Count occurrences once the log has gone quiet: in-flight lines from
+    earlier invocations must land BEFORE a before/after comparison samples
+    its baseline, or a late arrival fakes the +1 (Gate 3 #1)."""
+    deadline = time.monotonic() + timeout_s
+    count = _log_count(log_path, needle)
+    settled_at = time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        fresh = _log_count(log_path, needle)
+        if fresh != count:
+            count = fresh
+            settled_at = time.monotonic()
+        elif time.monotonic() - settled_at >= settle_s:
+            return count
+    return count
+
+
 def test_host_indexes_both_functions(functions_host):
     # Regression guard for the Bugfix-#3 class (zero functions indexed).
-    assert {WORKER_FUNCTION_NAME, HTTP_CATCH_ALL_FUNCTION} <= _indexed_functions(functions_host)
+    assert {WORKER_FUNCTION_NAME, HTTP_CATCH_ALL_FUNCTION} <= _indexed_functions(
+        functions_host.base_url
+    )
 
 
 def test_timer_wake_disabled_writes_skipped_heartbeat(functions_host, store, clean_worker_state):
     # No enabled row at all: the missing-row fail-safe must read as OFF (D4).
-    invoke_time = _invoke_worker(functions_host)
+    invoke_time = _invoke_worker(functions_host.base_url)
     heartbeat = _wait_for_heartbeat(store, after=invoke_time)
     assert heartbeat.status == HeartbeatStatus.SKIPPED_DISABLED
 
@@ -215,7 +262,31 @@ def test_timer_wake_enabled_without_gmail_creds_writes_skipped_no_access(
     # host-level proof (gmail-client REQ-2); the RAN path's live proof is the
     # first connected wake after deploy (gate E4, operator-accepted residual).
     store.set_enabled(True)
-    invoke_time = _invoke_worker(functions_host)
+    invoke_time = _invoke_worker(functions_host.base_url)
     heartbeat = _wait_for_heartbeat(store, after=invoke_time)
     assert heartbeat.status == HeartbeatStatus.SKIPPED_NO_ACCESS
     assert heartbeat.matched is None
+
+
+def test_http_route_log_reaches_host_console(functions_host, clean_worker_state):
+    # log-bridge REQ-1: a plain-def route's log record (emitted in anyio's
+    # threadpool) must be accepted by the host — visible in its console log.
+    # Without the bridge the host silently discards it (root-caused 2026-08-26).
+    response = httpx.get(
+        f"{functions_host.base_url}/api/auth/callback?state=bogus&code=bogus",
+        follow_redirects=False,
+        timeout=10,
+    )
+    # All callback failure paths 302; WHICH branch ran is proven by the log
+    # line itself — the assertion below is the point of the test.
+    assert response.status_code == 302
+    route_line = "callback rejected: invalid or expired state"
+    _wait_for_log_count(functions_host.log_path, route_line, minimum=1)
+
+    # log-bridge REQ-2: the timer path's platform-set attribution must survive
+    # the bridge in the real host. Drained baseline: earlier tests' wakes log
+    # AFTER their heartbeat proof, so a line can still be in flight here.
+    worker_line = "worker_run outcome="
+    before = _drained_log_count(functions_host.log_path, worker_line)
+    _invoke_worker(functions_host.base_url)
+    _wait_for_log_count(functions_host.log_path, worker_line, minimum=before + 1)

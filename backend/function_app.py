@@ -8,8 +8,16 @@ our own auth (JWT, per tech.md D17/D22) is the single, deliberate gate.
 
 import azure.functions as func
 
+from app.log_bridge import InvocationContextMiddleware, install_log_bridge
 from app.main import app as fastapi_app
 from app.worker import WORKER_FUNCTION_NAME, WORKER_TIMER_SCHEDULE, run_scheduled_worker
+
+# Both bridge halves live in this Functions-only entry point: app/main.py stays
+# free of Functions-specific code (structure.md), and the worker's log handler
+# is already on the root logger by the time this module imports (log-bridge
+# REQ-1/3). Middleware must be added before the host serves the first request.
+install_log_bridge()
+fastapi_app.add_middleware(InvocationContextMiddleware)
 
 app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONYMOUS)
 

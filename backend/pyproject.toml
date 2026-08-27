@@ -24,6 +24,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.9",
     "respx>=0.23.1",
+    "anyio>=4",
 ]
 
 [tool.pytest.ini_options]
