@@ -17,11 +17,15 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from opentelemetry import trace
+
+from app.observability import flush_telemetry
 from core.exceptions import NoAccessError, RunBusyError
 from core.state_store import Heartbeat, HeartbeatStatus, RunCounts, StateStore, get_state_store
 from pipeline.entry import run_pipeline
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer("app.worker")
 
 WORKER_FUNCTION_NAME = "worker"
 WORKER_TIMER_SCHEDULE = "0 */30 * * * *"  # NCRONTAB (6-field): second 0, every 30th minute (D5)
@@ -32,7 +36,35 @@ def run_worker(
     store: StateStore,
     pipeline: Callable[[], RunCounts],
 ) -> HeartbeatStatus:
-    """Execute one wake. Storage faults propagate — the host records a failed
+    """Execute one wake inside the `worker_run` root span (otel REQ-3.1).
+
+    Span kind is conditional: on the timer path there is no enclosing span,
+    and SERVER puts the run in the App Insights `requests` table — the row
+    the host used to emit before Host.Results suppression (Gate 3 H2). Under
+    process-now an HTTP SERVER span is already active, so the run nests as
+    INTERNAL (a second SERVER row would re-create the duplication REQ-1.2
+    eliminated). A pipeline exception is recorded on the span (status ERROR)
+    by the context manager and still propagates."""
+    kind = (
+        trace.SpanKind.INTERNAL
+        if trace.get_current_span().get_span_context().is_valid
+        else trace.SpanKind.SERVER
+    )
+    with _tracer.start_as_current_span("worker_run", kind=kind) as span:
+        try:
+            outcome = _execute_wake(store, pipeline)
+        except Exception:
+            span.set_attribute("worker.outcome", HeartbeatStatus.FAILED.value)
+            raise
+        span.set_attribute("worker.outcome", outcome.value)
+        return outcome
+
+
+def _execute_wake(
+    store: StateStore,
+    pipeline: Callable[[], RunCounts],
+) -> HeartbeatStatus:
+    """Storage faults propagate — the host records a failed
     invocation (no swallow-and-continue). The core wake contract exceptions
     classify the exits: NoAccessError (any workload's preflight) → skip;
     RunBusyError (lease held) → busy; a storage fault inside a skip branch
@@ -98,5 +130,14 @@ def run_scheduled_worker() -> None:
     with its request-scoped store — same wake path (gate honored, heartbeat
     written), with the returned outcome going into its HTTP response. Both
     compose the store via get_state_store() (worker-controls REQ-6.2).
+
+    Timer path only: bounded flush at run end (otel REQ-6.1) — a Consumption
+    freeze right after the invocation must not strand the batch buffers. The
+    HTTP process-now path deliberately does NOT flush (probe 0d: the instance
+    outlives the response long enough for the ~5s batch cycle; a flush would
+    add up to 5s to the response for nothing).
     """
-    run_wake(get_state_store())
+    try:
+        run_wake(get_state_store())
+    finally:
+        flush_telemetry()

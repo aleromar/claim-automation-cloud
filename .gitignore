@@ -37,3 +37,8 @@ e2e/.env.live
 docs/
 # TypeScript incremental-build cache (tsc -b) — machine-generated
 *.tsbuildinfo
+
+# Functions deploy-package artifacts (CI vendors these on the runner; local
+# vendoring for ad-hoc deploys must never be committed)
+backend/.python_packages/
+backend/requirements.txt

@@ -1,5 +1,14 @@
 """Shared pytest fixtures for the backend."""
 
+import os
+
+# Hermeticity (otel Gate 3 H1): an ambient connection string would make
+# test_function_app's import install REAL Azure exporters at collection time
+# — before any fixture can intervene — and ship unit-test telemetry to a live
+# App Insights. Module-level on purpose: conftest imports precede test-module
+# imports.
+os.environ.pop("APPLICATIONINSIGHTS_CONNECTION_STRING", None)
+
 import pytest
 from fastapi.testclient import TestClient
 

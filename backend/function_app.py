@@ -8,16 +8,16 @@ our own auth (JWT, per tech.md D17/D22) is the single, deliberate gate.
 
 import azure.functions as func
 
-from app.log_bridge import InvocationContextMiddleware, install_log_bridge
 from app.main import app as fastapi_app
+from app.observability import instrument_fastapi, setup_telemetry
 from app.worker import WORKER_FUNCTION_NAME, WORKER_TIMER_SCHEDULE, run_scheduled_worker
 
-# Both bridge halves live in this Functions-only entry point: app/main.py stays
-# free of Functions-specific code (structure.md), and the worker's log handler
-# is already on the root logger by the time this module imports (log-bridge
-# REQ-1/3). Middleware must be added before the host serves the first request.
-install_log_bridge()
-fastapi_app.add_middleware(InvocationContextMiddleware)
+# Telemetry lives in this Functions-only entry point: app/main.py stays free of
+# Functions-specific wiring (structure.md), and instrumentation must attach
+# before the host serves the first request (otel-observability REQ-1). Under
+# uvicorn neither call has any effect (no connection string → inert).
+setup_telemetry()
+instrument_fastapi(fastapi_app)
 
 app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONYMOUS)
 
