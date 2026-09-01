@@ -17,6 +17,14 @@ dependencies = [
     "reportlab>=5.0",
     "pillow>=10.0",
     "azure-storage-blob>=12.24",
+    # otel-observability (D28): pipeline/ imports the API directly, so it is
+    # a first-class dependency, not a transitive accident.
+    "opentelemetry-api>=1.43.0",
+    "azure-monitor-opentelemetry-exporter>=1.0.0b56",
+    "opentelemetry-sdk>=1.43.0",
+    "opentelemetry-instrumentation-fastapi>=0.64b0",
+    "opentelemetry-instrumentation-httpx>=0.64b0",
+    "azure-core-tracing-opentelemetry>=1.0.0b13",
 ]
 
 [dependency-groups]

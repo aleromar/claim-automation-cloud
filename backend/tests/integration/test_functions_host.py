@@ -207,19 +207,6 @@ def _log_count(log_path: Path, needle: str) -> int:
     return log_path.read_text(encoding="utf-8", errors="replace").count(needle)
 
 
-def _wait_for_log_count(log_path: Path, needle: str, minimum: int, timeout_s: float = 20) -> None:
-    """Poll the host console log until `needle` appears >= `minimum` times.
-    Polled, not read once: worker→gRPC→host→stdout forwarding is asynchronous."""
-    deadline = time.monotonic() + timeout_s
-    count = 0
-    while time.monotonic() < deadline:
-        count = _log_count(log_path, needle)
-        if count >= minimum:
-            return
-        time.sleep(0.5)
-    pytest.fail(f"{needle!r}: {count} occurrence(s) in host log after {timeout_s}s, need {minimum}")
-
-
 def _drained_log_count(
     log_path: Path, needle: str, settle_s: float = 2, timeout_s: float = 15
 ) -> int:
@@ -268,25 +255,25 @@ def test_timer_wake_enabled_without_gmail_creds_writes_skipped_no_access(
     assert heartbeat.matched is None
 
 
-def test_http_route_log_reaches_host_console(functions_host, clean_worker_state):
-    # log-bridge REQ-1: a plain-def route's log record (emitted in anyio's
-    # threadpool) must be accepted by the host — visible in its console log.
-    # Without the bridge the host silently discards it (root-caused 2026-08-26).
+def test_user_logs_suppressed_at_host(functions_host, clean_worker_state):
+    # otel-observability REQ-4/Task 0b: user logs now travel the worker-owned
+    # OTel pipeline only; host.json logLevel mutes host forwarding
+    # (Function.<name>.User → None). In the real host that must mean the
+    # route's log line does NOT surface via the host — while the route itself
+    # still works. (Supersedes the log-bridge console test: the bridge and its
+    # host-forwarding path were deleted, D28.)
     response = httpx.get(
         f"{functions_host.base_url}/api/auth/callback?state=bogus&code=bogus",
         follow_redirects=False,
         timeout=10,
     )
-    # All callback failure paths 302; WHICH branch ran is proven by the log
-    # line itself — the assertion below is the point of the test.
     assert response.status_code == 302
     route_line = "callback rejected: invalid or expired state"
-    _wait_for_log_count(functions_host.log_path, route_line, minimum=1)
 
-    # log-bridge REQ-2: the timer path's platform-set attribution must survive
-    # the bridge in the real host. Drained baseline: earlier tests' wakes log
-    # AFTER their heartbeat proof, so a line can still be in flight here.
+    # Same for the timer path: the wake must complete (heartbeat is its
+    # proof, covered above) with its user log line absent from the host log.
     worker_line = "worker_run outcome="
-    before = _drained_log_count(functions_host.log_path, worker_line)
     _invoke_worker(functions_host.base_url)
-    _wait_for_log_count(functions_host.log_path, worker_line, minimum=before + 1)
+    time.sleep(5)  # grace: give the host time to (wrongly) flush either line
+    assert _drained_log_count(functions_host.log_path, route_line) == 0
+    assert _drained_log_count(functions_host.log_path, worker_line) == 0

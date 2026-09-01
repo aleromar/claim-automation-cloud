@@ -6,6 +6,11 @@
     }
   },
   "logging": {
+    "logLevel": {
+      "Host.Results": "None",
+      "Function.http_app_func.User": "None",
+      "Function.worker.User": "None"
+    },
     "applicationInsights": {
       "samplingSettings": {
         "isEnabled": true,
