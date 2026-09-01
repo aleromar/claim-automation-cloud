@@ -119,6 +119,14 @@ def test_threadpool_route_log_carries_request_trace_context(otel_clean):
 def test_internal_loggers_excluded_from_export(otel_clean):
     logging.getLogger("opentelemetry.sdk.whatever").warning("%s internal", MARKER)
     logging.getLogger("azure.monitor.opentelemetry.exporter.x").warning("%s internal", MARKER)
+    # azure.core pipeline policies log the EXPORTER'S OWN ingestion POSTs at
+    # INFO — captured, they feed back into the export queue: a self-sustaining
+    # telemetry loop (~54k rows/4h observed live, and the probe's force_flush
+    # hang: EXPORT_ALL can never drain a queue that export itself refills).
+    logging.getLogger("azure.core.pipeline.policies._universal").warning("%s internal", MARKER)
+    logging.getLogger("azure.core.pipeline.policies.http_logging_policy").warning(
+        "%s internal", MARKER
+    )
     logging.getLogger("app.unit").warning("%s external", MARKER)
     bodies = [str(d.log_record.body) for d in otel_clean.logs.get_finished_logs()]
     assert [b for b in bodies if MARKER in b] == [f"{MARKER} external"]

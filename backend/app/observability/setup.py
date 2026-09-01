@@ -31,10 +31,25 @@ _logger_provider = None
 
 
 class _DropTelemetryInternals(logging.Filter):
-    """Exporter/SDK internals must not feed back into the OTel handler (REQ-6.4)."""
+    """Exporter/SDK internals must not feed back into the OTel handler (REQ-6.4).
+
+    azure.core.pipeline.policies is in the list because the Azure Monitor
+    exporter is itself an azure-core client: its ingestion POSTs are logged
+    at INFO by http_logging_policy, and capturing those records refills the
+    export queue on every export — a self-sustaining telemetry loop
+    (observed live: ~54k rows/4h while idle; also the mechanism behind the
+    probe's unbounded force_flush hang). KV/Table request lines from the
+    same policy are redundant with their dependency spans.
+    """
+
+    _DROP_PREFIXES = (
+        "opentelemetry",
+        "azure.monitor.opentelemetry",
+        "azure.core.pipeline.policies",
+    )
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return not record.name.startswith(("opentelemetry", "azure.monitor.opentelemetry"))
+        return not record.name.startswith(self._DROP_PREFIXES)
 
 
 def setup_telemetry(span_exporter=None, log_exporter=None) -> bool:
