@@ -1,0 +1,124 @@
+{
+  "_about": [
+    "Five real-layout claim emails, anonymized. Each case stores the two MIME parts of a Gmail",
+    "forward: <slug>.txt is Gmail's text/plain rendering (close to _html_to_plain output, i.e. the",
+    "regex/arm-(a) input) and <slug>.html is Gmail's rewrite of the insurer's XHTML (head/style",
+    "dropped, class names prefixed with the message id; close to the attribute-stripped arm (b')).",
+    "Neither part is byte-identical to a direct insurer email, whose text/plain part IS the XHTML.",
+    "Gmail-forward artifacts to expect in .txt: a hand-typed annotation line at the top, the",
+    "'---------- Forwarded message ---------' preamble, '[image: Imagen 1]', hard wraps at ~76",
+    "columns, U+200E marks, and (comunicacion_perito_ip) a Google-Maps link inserted after the",
+    "address. Every name, NIF, phone, e-mail, street, town, policy and claim number is fictional;",
+    "insurer brand, amounts, dates and coverage boilerplate are unchanged."
+  ],
+  "provenance": "Forwarded by the collaborator to the dev mailbox on 2026-09-09; anonymized 2026-09-14.",
+  "gold_status": "CONFIRMED by the operator 2026-09-14 against the original emails, applying field_rules.",
+  "field_rules": {
+    "insurance_company": "Compañía: in Datos de la Entidad",
+    "nif": "Nif: in Datos del Asegurado",
+    "owner_name": "Tomador: in Datos del Asegurado, verbatim (surname-comma-name order kept)",
+    "address": "Dirección: in Datos del Siniestro; fall back to the Asegurado's Dirección in Implicados only when blank",
+    "town": "Localidad: in Datos del Siniestro",
+    "phone_number": "the Asegurado's Tfno in Implicados (the single implicado for asistencia); never Interviene or Perjudicado",
+    "description": "Descripción: in Datos del Siniestro only, never spilling into Implicados",
+    "observaciones": "Observaciones: body text, ONLY for Comunicación a colaborador; null for every other type",
+    "comparison": "whitespace-collapsed, U+200E stripped, otherwise exact"
+  },
+  "cases": [
+    {
+      "slug": "asistencia_envio_profesionales",
+      "subject": "2099/000011 Solicitud de asistencia a colaborador (H)Envio N-EXAMPL11",
+      "claim_type": "SOLICITUD_ASISTENCIA_ENVIO_PROFESIONALES",
+      "year": "2099",
+      "claim_number": "000011",
+      "gold": {
+        "insurance_company": "Reale",
+        "nif": "00000011B",
+        "address": "CAMINO FICTICIO - DESA",
+        "phone_number": "600000011",
+        "town": "VEGA DE EJEMPLO",
+        "description": "Necesita asistencia con el profesional correspondiente para colocar/ arreglar la persiana",
+        "owner_name": "GARCIA EJEMPLO , EMILIO",
+        "observaciones": null
+      },
+      "regex_known_failures": ["description"],
+      "notes": "First real asistencia sample. Layout differs from siniestros: no 'Tipo:' line after Descripción, Implicados has no 'Asegurado:' label, an empty 'Observaciones:' footer. The regex description anchor 'Tipo:' therefore matches the Implicados 'Tipo: Móvil' and swallows the Implicados block."
+    },
+    {
+      "slug": "comunicacion_perito_ip",
+      "subject": "2098/000012 Comunicación a colaborador (H)Envio N-EXAMPL12",
+      "claim_type": "COMUNICACION_A_COLABORADOR",
+      "year": "2098",
+      "claim_number": "000012",
+      "gold": {
+        "insurance_company": null,
+        "nif": null,
+        "address": null,
+        "phone_number": null,
+        "town": null,
+        "description": null,
+        "owner_name": null,
+        "observaciones": "Buemos días disponen de ip por parte del perito? Gracias"
+      },
+      "regex_known_failures": [],
+      "notes": "Real comunicación, full layout (Datos de la Entidad/Asegurado/Siniestro, two implicados, Interviene with a third-party perito). Typo 'Buemos' is in the source. Prior-year claim reference (2098 stands in for 2025)."
+    },
+    {
+      "slug": "comunicacion_tapar_catas",
+      "subject": "2099/000013 Comunicación a colaborador (H)Envio N-EXAMPL13",
+      "claim_type": "COMUNICACION_A_COLABORADOR",
+      "year": "2099",
+      "claim_number": "000013",
+      "gold": {
+        "insurance_company": null,
+        "nif": null,
+        "address": null,
+        "phone_number": null,
+        "town": null,
+        "description": null,
+        "owner_name": null,
+        "observaciones": "No logramos contacto con reparador Solicitamos informen si han acudido a tapar catas"
+      },
+      "regex_known_failures": [],
+      "notes": "Second real comunicación; observaciones wraps over two lines in the .txt (Gmail hard wrap)."
+    },
+    {
+      "slug": "siniestro_urgente_atasco",
+      "subject": "2099/000014 Declaración de siniestro a colaborador URGENTE (H)Envio N-EXAMPL14",
+      "claim_type": "DECLARACION_URGENTE",
+      "year": "2099",
+      "claim_number": "000014",
+      "gold": {
+        "insurance_company": "Reale",
+        "nif": "00000014Z",
+        "address": "CALLE FICTICIA 6",
+        "phone_number": "600000014",
+        "town": "VILLANUEVA DE EJEMPLO",
+        "description": "ATASCO DE TUBERÍA GENERAL DE LA CASA. CUANDO USAN ALGÚN SANITARIO REBOSAN AGUA LOS DEMÁS SIN DAÑOS.",
+        "owner_name": "TEODORO EJEMPLO CUARTO",
+        "observaciones": null
+      },
+      "regex_known_failures": [],
+      "notes": "Hogar (not Comunidades) URGENTE with a filled Histórico de Siniestros, a long Garantías block, a '** URGENTE **' Observaciones section and a CUADRO DE COBERTURAS. Multi-word town. Description wraps over two lines in the .txt."
+    },
+    {
+      "slug": "siniestro_normal_tuberia",
+      "subject": "2099/000015 Declaración de siniestro a colaborador NORMAL (H)Envio N-EXAMPL15",
+      "claim_type": "DECLARACION_SINIESTRO",
+      "year": "2099",
+      "claim_number": "000015",
+      "gold": {
+        "insurance_company": "Reale",
+        "nif": "00000015S",
+        "address": "AVENIDA FICTICIA 8 2º DCHA",
+        "phone_number": "600000015",
+        "town": "VILLANUEVA",
+        "description": "posible rotura de tubería de calefacción empotrada causando daños al piso inferior dañando techo de una habitación y techo de pasillo",
+        "owner_name": "ENCARNA EJEMPLO QUINTA",
+        "observaciones": null
+      },
+      "regex_known_failures": [],
+      "notes": "Hogar NORMAL with Asegurado and Perjudicado at different floors of the same street (address disambiguation case: siniestro/asegurado 2º DCHA vs perjudicado 1º DCHA), two Garantías, empty Histórico."
+    }
+  ]
+}
