@@ -8,6 +8,7 @@ refs, subjects, or other identifiers (PII stance).
 
 import base64
 import io
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -15,13 +16,70 @@ from time import monotonic
 
 import pytest
 from PIL import Image as PILImage
+from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.models.function import FunctionModel
 
 from app.worker import run_worker
+from core.config import Settings
 from core.state_store import RunCounts
+from pipeline.claim_data import ClaimType
 from pipeline.entry import RUN_DEADLINE_S, process_mailbox
-from pipeline.extraction import ClaimFields
+from pipeline.extraction import EXTRACTOR_LLM, ClaimFields
+from pipeline.llm_extraction import AGENT_NAME, LOG_EVENT, LlmFieldExtractor
 
 pytestmark = pytest.mark.usefixtures("otel_clean")
+
+# llm-extraction REQ-5.4 scoping key (Task 0c): both Pydantic AI spans — the
+# `chat …` CLIENT span and the `invoke_agent llm_extraction` INTERNAL span —
+# carry this instrumentation scope; they are the ONLY spans allowed to hold
+# claim text (REQ-5.2, operator decision: content capture ON).
+PYDANTIC_AI_SCOPE = "pydantic-ai"
+
+LLM_SUBJECT = "2026/123456 Declaración de siniestro a colaborador NORMAL"
+LLM_BODY = "Compañía: Reale\n\nNif: H12345678\n\nTomador: CDAD EJEMPLO\n\nTfno : 600000001\n"
+LLM_ANSWER = {
+    "insurance_company": "Reale",
+    "nif": "H12345678",
+    "phone_number": "600000001",
+    "owner_name": "CDAD EJEMPLO",
+}
+CLAIM_TEXT_NEEDLES = ("Reale", "H12345678", "600000001", "CDAD EJEMPLO", "2026/123456")
+
+
+def assert_no_claim_text(spans, needles=CLAIM_TEXT_NEEDLES) -> None:
+    """PII stance for pipeline spans: no attribute value may carry claim text.
+    Pydantic AI spans are skipped — they carry prompt + answer by design."""
+    for span in spans:
+        if span.instrumentation_scope.name == PYDANTIC_AI_SCOPE:
+            continue
+        for value in span.attributes.values():
+            for needle in needles:
+                assert needle not in str(value), (span.name, needle)
+
+
+def answer_gold(messages, info) -> ModelResponse:
+    allowed = info.model_request_parameters.output_object.json_schema["properties"]
+    body = {k: v for k, v in LLM_ANSWER.items() if k in allowed}
+    return ModelResponse(parts=[TextPart(json.dumps(body))], finish_reason="stop")
+
+
+async def dummy_token() -> str:
+    return "DUMMY"
+
+
+def run_llm_extraction(capture_content: bool) -> ClaimFields:
+    """One extraction under FunctionModel with the production instrumentation
+    wiring — the only difference from prod is the model."""
+    settings = Settings(
+        field_extractor_backend=EXTRACTOR_LLM,
+        foundry_endpoint="https://foundry.example/openai/v1/",
+        llm_capture_content=capture_content,
+    )
+    extractor = LlmFieldExtractor(settings, token=dummy_token, model=FunctionModel(answer_gold))
+    try:
+        return extractor.extract(ClaimType.DECLARACION_SINIESTRO, LLM_SUBJECT, LLM_BODY, LLM_BODY)
+    finally:
+        extractor.close()
 
 
 class FakeStore:
@@ -227,10 +285,7 @@ def test_pipeline_stage_spans_happy_path(otel_clean):
     )
     assert email_span.attributes["email.action"] == "card"
     # PII stance: no attribute value may carry the claim ref or subject text
-    for s in otel_clean.spans.get_finished_spans():
-        for v in s.attributes.values():
-            assert "2024/7" not in str(v)
-            assert "Declaración" not in str(v)
+    assert_no_claim_text(otel_clean.spans.get_finished_spans(), ("2024/7", "Declaración"))
 
 
 def test_pipeline_email_span_error_on_failing_email(otel_clean):
@@ -242,6 +297,116 @@ def test_pipeline_email_span_error_on_failing_email(otel_clean):
         s for s in otel_clean.spans.get_finished_spans() if s.name == "pipeline.email"
     )
     assert email_span.status.status_code.name == "ERROR"
+
+
+# --- llm-extraction REQ-5.1/5.2/5.4: the two gen_ai spans, content iff the switch ---
+
+
+def _pydantic_ai_spans(otel) -> dict[str, object]:
+    return {
+        s.name: s
+        for s in otel.spans.get_finished_spans()
+        if s.instrumentation_scope.name == PYDANTIC_AI_SCOPE
+    }
+
+
+def test_llm_extractor_emits_the_two_gen_ai_spans(otel_clean):
+    fields = run_llm_extraction(capture_content=True)
+    assert fields.extractor_used == "llm"
+    spans = _pydantic_ai_spans(otel_clean)
+    agent_span = spans[f"invoke_agent {AGENT_NAME}"]
+    (chat_span,) = [s for name, s in spans.items() if name.startswith("chat ")]
+    assert agent_span.kind.name == "INTERNAL"
+    assert agent_span.attributes["gen_ai.operation.name"] == "invoke_agent"
+    assert chat_span.kind.name == "CLIENT"
+    assert chat_span.attributes["gen_ai.operation.name"] == "chat"
+    assert chat_span.parent.span_id == agent_span.context.span_id
+
+
+def test_llm_spans_carry_content_when_capture_is_on(otel_clean):
+    run_llm_extraction(capture_content=True)
+    spans = _pydantic_ai_spans(otel_clean)
+    (chat_span,) = [s for name, s in spans.items() if name.startswith("chat ")]
+    agent_span = spans[f"invoke_agent {AGENT_NAME}"]
+    assert "Reale" in chat_span.attributes["gen_ai.input.messages"]
+    assert "H12345678" in chat_span.attributes["gen_ai.output.messages"]
+    assert "final_result" in agent_span.attributes  # the second copy, accepted (Task 0c)
+    # The shared helper must SKIP these spans and stay strict for pipeline ones.
+    assert_no_claim_text(otel_clean.spans.get_finished_spans())
+
+
+def test_llm_spans_carry_no_content_when_capture_is_off(otel_clean):
+    run_llm_extraction(capture_content=False)
+    spans = _pydantic_ai_spans(otel_clean)
+    assert len(spans) == 2  # skeletons still exported
+    for span in spans.values():
+        for value in span.attributes.values():
+            for needle in CLAIM_TEXT_NEEDLES:
+                assert needle not in str(value), (span.name, needle)
+    assert "final_result" not in spans[f"invoke_agent {AGENT_NAME}"].attributes
+
+
+def test_no_claim_text_helper_stays_strict_for_pipeline_spans(otel_clean):
+    from opentelemetry import trace
+
+    with trace.get_tracer("pipeline.test").start_as_current_span("pipeline.leak") as span:
+        span.set_attribute("bad", "Reale")
+    with pytest.raises(AssertionError):
+        assert_no_claim_text(otel_clean.spans.get_finished_spans())
+
+
+# --- llm-extraction REQ-5.3: the INFO line's dimensions reach the OTel log exporter ---
+
+
+def test_llm_info_line_dimensions_reach_the_log_exporter(otel_clean, caplog):
+    # The D28 handler is on the root logger at INFO; the Functions worker runs
+    # the root at INFO too (existing pipeline INFO lines land in App Insights).
+    # A bare interpreter's root is WARNING, so the level is raised here.
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="pipeline.llm_extraction"):
+        run_llm_extraction(capture_content=True)
+    records = [
+        d.log_record
+        for d in otel_clean.logs.get_finished_logs()
+        if d.log_record.attributes.get("event") == LOG_EVENT
+    ]
+    assert len(records) == 1, "exactly one llm_extraction line per call"
+    attrs = records[0].attributes
+    assert attrs["extractor_used"] == "llm"
+    assert attrs["claim_type"] == "DECLARACION_SINIESTRO"
+    assert attrs["gen_ai.request.model"] == "gpt-5-mini"
+    assert isinstance(attrs["duration_ms"], int)
+    assert isinstance(attrs["gen_ai.usage.input_tokens"], int)
+    assert attrs["finish_reason"] == "stop"
+    assert "extraction.prompt_sha" in attrs
+    rendered = str(records[0].body) + " ".join(str(v) for v in attrs.values())
+    for needle in CLAIM_TEXT_NEEDLES:
+        assert needle not in rendered, needle
+
+
+# --- llm-extraction REQ-5.5: no provider → no spans, no error (fresh interpreter) ---
+
+
+def test_llm_extractor_noop_without_provider():
+    code = (
+        "import sys; sys.path.insert(0, 'tests/unit')\n"
+        "from opentelemetry import trace\n"
+        "from test_telemetry_spans import run_llm_extraction\n"
+        "fields = run_llm_extraction(True)\n"
+        "print('noop-ok', fields.extractor_used, type(trace.get_tracer_provider()).__name__)\n"
+    )
+    backend_dir = Path(__file__).resolve().parents[2]
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=backend_dir,
+        env={**__import__("os").environ, "PYDANTIC_AI_NO_BANNER": "1"},
+    )
+    assert out.returncode == 0, out.stderr
+    assert "noop-ok llm ProxyTracerProvider" in out.stdout
 
 
 # --- pipeline no-ops without any provider (fresh interpreter, no SDK wiring) ---

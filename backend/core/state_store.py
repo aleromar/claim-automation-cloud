@@ -85,6 +85,7 @@ CLAIM_TYPE_PROP = "type"
 CLAIM_TOWN_PROP = "town"
 CLAIM_OWNER_PROP = "owner"
 CLAIM_CARD_URL_PROP = "card_url"
+CLAIM_EXTRACTOR_PROP = "extractor_used"  # provenance (llm-extraction REQ-4); absent pre-5a2
 RUN_LEASE_AT_PROP = "at"
 
 # The Table service reports a missing entity ("ResourceNotFound", or
@@ -151,6 +152,10 @@ class ClaimRecord(BaseModel):
     town: str | None = None
     owner: str | None = None
     card_url: str
+    # Which extractor filled the fields (pipeline.extraction.ExtractorUsed's
+    # value as a str — core must not import pipeline); None on rows written
+    # before the property existed. Table Storage is schemaless: no migration.
+    extractor_used: str | None = None
 
 
 class TrelloConfig(BaseModel):
@@ -169,6 +174,7 @@ def _to_claim_record(entity: TableEntity) -> ClaimRecord:
         town=entity.get(CLAIM_TOWN_PROP),
         owner=entity.get(CLAIM_OWNER_PROP),
         card_url=entity[CLAIM_CARD_URL_PROP],
+        extractor_used=entity.get(CLAIM_EXTRACTOR_PROP),
     )
 
 
@@ -324,6 +330,8 @@ class StateStore:
             entity[CLAIM_TOWN_PROP] = record.town
         if record.owner is not None:
             entity[CLAIM_OWNER_PROP] = record.owner
+        if record.extractor_used is not None:
+            entity[CLAIM_EXTRACTOR_PROP] = record.extractor_used
         with self._lock:
             self._table(CLAIM_HISTORY_TABLE).upsert_entity(entity, mode=UpdateMode.REPLACE)
 

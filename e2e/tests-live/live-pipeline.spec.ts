@@ -33,6 +33,20 @@ const withMarker = (marker: string): string =>
     ? ASITUR_BODY.replace("</body>", `<p>pide ${marker}</p></body>`)
     : `${ASITUR_BODY}<p>pide ${marker}</p>`;
 
+// Process-now wall-time bound (llm-extraction Task 11, replaces the dropped
+// cold-start spike — operator: "see how long it took before and set a similar
+// time plus a margin"). Measured from the click to the outcome render.
+// BASELINE: the two regex runs of 2026-09-01 on staging took 12.9 s / 13.5 s
+// of pipeline time (`worker_run` span, App Insights) for these six emails,
+// plus ~1 s of HTTP + render. MARGIN (operator's number, proposed): six model
+// calls at ~3 s + the LLM stack's cold import without .pyc (~8 s) + first
+// token (~1.5 s) + two first-call grammar compiles (≤4 s each). A trip after
+// the `llm` flip is the signal to consider `--compile-bytecode` in deploy.yml
+// — never before (spec Deploy row).
+const PROCESS_NOW_BASELINE_MS = 15_000;
+const PROCESS_NOW_MARGIN_MS = 45_000;
+const PROCESS_NOW_BUDGET_MS = PROCESS_NOW_BASELINE_MS + PROCESS_NOW_MARGIN_MS;
+
 const gmail = new GmailLive();
 const trello = new TrelloLive();
 
@@ -187,14 +201,26 @@ test("all six claim types flow through the real pipeline in one run", async ({
   // the metrics panel are alerts too, and a banner left over from a previous
   // failed run matched instantly while the wake was still in flight (staging
   // gate run 2, Bugfix log).
+  const processNowStarted = Date.now();
   await page.getByRole("button", { name: /procesar ahora/i }).click();
   const runFailed = page.getByText(/la acción ha fallado/i);
   await expect(page.getByText(/resultado:/i).or(runFailed)).toBeVisible({
     timeout: 200_000,
   });
+  const processNowElapsedMs = Date.now() - processNowStarted;
   if (await runFailed.isVisible()) {
     throw new Error("process-now returned an error — run-failure alert shown");
   }
+  // Recorded on every run so the regex and llm figures sit side by side in the
+  // job logs; asserted so a cold-start regression after the flip is red.
+  console.log(
+    `process-now wall time: ${processNowElapsedMs} ms (budget ${PROCESS_NOW_BUDGET_MS} ms)`,
+  );
+  expect(
+    processNowElapsedMs,
+    `process-now took ${processNowElapsedMs} ms — over baseline ` +
+      `${PROCESS_NOW_BASELINE_MS} + margin ${PROCESS_NOW_MARGIN_MS}`,
+  ).toBeLessThan(PROCESS_NOW_BUDGET_MS);
   await expect(page.getByText(/resultado:/i)).toHaveText(/resultado: completado/i, {
     timeout: 5_000,
   });

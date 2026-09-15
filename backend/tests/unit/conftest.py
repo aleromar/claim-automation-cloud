@@ -7,9 +7,53 @@ don't request `otel` never trigger the install.
 """
 
 import os
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+# --- llm-extraction REQ-6.4 Tier 2: pytest-recording (VCR) configuration ---
+# Public repo: cassettes hold anonymized fixture text only and no infra
+# identifiers. The Foundry host is rewritten in the URI AND filtered from the
+# request `host` header (Task 0e: the header kept the real host); Azure/APIM
+# response headers are dropped. Body matching is mandatory: all five cases POST
+# the same path, so without it an edited prompt would replay a stale answer.
+CASSETTE_HOST = "foundry.example"
+CASSETTES_DIR = Path(__file__).parent.parent / "cassettes"
+SCRUBBED_RESPONSE_HEADER_PREFIXES = ("x-ms-", "apim-", "azureml-", "azureai-", "x-ratelimit-")
+# Credential-chain probes must never be recorded or replayed.
+IGNORED_HOSTS = ("169.254.169.254", "login.microsoftonline.com")
+
+
+def _scrub_request(request):
+    request.uri = re.sub(r"^https://[^/]+/", f"https://{CASSETTE_HOST}/", request.uri, count=1)
+    return request
+
+
+def _scrub_response(response):
+    headers = response.get("headers", {})
+    for name in list(headers):
+        if name.lower().startswith(SCRUBBED_RESPONSE_HEADER_PREFIXES):
+            del headers[name]
+    return response
+
+
+@pytest.fixture(scope="module")
+def vcr_config():
+    return {
+        "match_on": ["method", "scheme", "host", "port", "path", "query", "body"],
+        "filter_headers": ["authorization", "api-key", "host"],
+        "before_record_request": _scrub_request,
+        "before_record_response": _scrub_response,
+        "decode_compressed_response": True,
+        "ignore_hosts": list(IGNORED_HOSTS),
+    }
+
+
+@pytest.fixture(scope="module")
+def vcr_cassette_dir():
+    return str(CASSETTES_DIR)
 
 
 @pytest.fixture(scope="session")

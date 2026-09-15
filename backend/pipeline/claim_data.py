@@ -76,6 +76,9 @@ class ClaimData(BaseModel):
     description: str | None = None
     owner_name: str | None = None
     observaciones: str | None = None
+    # Provenance, not a value field: which extractor filled the fields
+    # (pipeline.extraction.ExtractorUsed's value, arriving as a plain str).
+    extractor_used: str | None = None
 
     @classmethod
     def from_msg_data(

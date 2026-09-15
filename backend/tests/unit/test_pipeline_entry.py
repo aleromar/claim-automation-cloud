@@ -16,6 +16,7 @@ import pytest
 from PIL import Image as PILImage
 
 import pipeline.entry
+from core.config import Settings
 from core.state_store import RunCounts
 from pipeline.claim_data import (
     CLAIM_SUBJECT_MARKERS,
@@ -36,7 +37,7 @@ from pipeline.entry import (
     build_claim_query,
     process_mailbox,
 )
-from pipeline.extraction import ClaimFields
+from pipeline.extraction import ClaimFields, ExtractorUsed
 
 CLAIM_SUBJECT = "AVISO: Declaración de siniestro a colaborador 2026/417"
 URGENTE_SUBJECT = "Declaración de siniestro urgente a colaborador 2026/500"
@@ -293,6 +294,27 @@ def test_ledger_row_carries_the_card_url_and_type():
     assert record.type == "DECLARACION_SINIESTRO"
     assert record.town == "Madrid"
     assert record.owner == "Nombre Apellido"
+    assert record.extractor_used is None  # the fake tags nothing
+
+
+def test_ledger_row_carries_the_extractor_provenance():
+    # llm-extraction REQ-4.1: _process_one copies claim.extractor_used onto the row.
+    from time import monotonic
+
+    class TaggingExtractor:
+        def extract(self, claim_type, subject, body, raw_body) -> ClaimFields:
+            return ClaimFields(town="Madrid", owner_name="N A", extractor_used=ExtractorUsed.LLM)
+
+    history = FakeHistory()
+    process_mailbox(
+        FakeGmail([_msg("m1", CLAIM_SUBJECT, 100)]),
+        FakeTrello(),
+        FakeMembretes(),
+        history,
+        deadline=monotonic() + RUN_DEADLINE_S,
+        extractor=TaggingExtractor(),
+    )
+    assert history.rows["2026/417"].extractor_used == "llm"
 
 
 # --- REQ-7 wiring: the PDF reaches Trello in memory ---
@@ -503,22 +525,50 @@ class SeamStore:
         return None  # SeamTrello ignores it
 
 
+class SeamExtractor:
+    """What run_pipeline gets back from get_field_extractor (llm-extraction REQ-1.3)."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def extract(self, claim_type, subject, body, raw_body) -> ClaimFields:
+        return ClaimFields()
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class SeamFactory:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.extractor = SeamExtractor()
+
+    def __call__(self, name, settings=None):
+        self.calls.append((name, settings))
+        return self.extractor
+
+
 @pytest.fixture
 def seams(monkeypatch):
     SeamClient.instances = []
     SeamEvents.log = []
     store = SeamStore()
+    settings = Settings()
+    factory = SeamFactory()
     monkeypatch.setattr(pipeline.entry, "GmailClient", SeamGmail)
     monkeypatch.setattr(pipeline.entry, "TrelloClient", SeamTrello)
     monkeypatch.setattr(pipeline.entry, "get_state_store", lambda: store)
-    monkeypatch.setattr(pipeline.entry, "get_settings", lambda: object())
+    monkeypatch.setattr(pipeline.entry, "get_settings", lambda: settings)
     monkeypatch.setattr(pipeline.entry, "get_store", lambda: object())
+    monkeypatch.setattr(pipeline.entry, "get_field_extractor", factory)
     monkeypatch.setattr(pipeline.entry, "_build_membrete_source", lambda settings: FakeMembretes())
     monkeypatch.setattr(
         pipeline.entry,
         "process_mailbox",
         lambda *a, **k: RunCounts(processed=0, failed=0, failed_total=0),
     )
+    store.settings = settings
+    store.factory = factory
     return store
 
 
@@ -566,6 +616,81 @@ def test_run_pipeline_closes_clients_and_releases_lease_on_failure(seams, monkey
         run_pipeline()
     assert all(client.closed for client in SeamClient.instances)
     assert seams.released is True
+
+
+def test_run_pipeline_builds_the_extractor_from_the_setting(seams):
+    # llm-extraction REQ-1.3: closes the wiring gap — the flag is read here.
+    from pipeline.entry import run_pipeline
+
+    run_pipeline()
+    assert seams.factory.calls == [(seams.settings.field_extractor_backend, seams.settings)]
+
+
+def test_run_pipeline_passes_the_extractor_to_process_mailbox(seams, monkeypatch):
+    from pipeline.entry import run_pipeline
+
+    seen: dict = {}
+
+    def capturing_process(*args, **kwargs):
+        seen.update(kwargs)
+        return RunCounts(processed=0, failed=0, failed_total=0)
+
+    monkeypatch.setattr(pipeline.entry, "process_mailbox", capturing_process)
+    run_pipeline()
+    assert seen["extractor"] is seams.factory.extractor
+
+
+def test_run_pipeline_closes_the_extractor_with_the_clients(seams):
+    from pipeline.entry import run_pipeline
+
+    run_pipeline()
+    assert seams.factory.extractor.closed is True
+
+
+def test_run_pipeline_closes_the_extractor_on_failure(seams, monkeypatch):
+    from pipeline.entry import run_pipeline
+
+    def exploding_process(*args, **kwargs):
+        raise ConnectionError("mid-run failure")
+
+    monkeypatch.setattr(pipeline.entry, "process_mailbox", exploding_process)
+    with pytest.raises(ConnectionError):
+        run_pipeline()
+    assert seams.factory.extractor.closed is True
+    assert all(client.closed for client in SeamClient.instances)
+
+
+def test_run_pipeline_propagates_extractor_config_error_and_releases_lease(seams, monkeypatch):
+    # llm-extraction REQ-1.2: a bad flip fails the RUN (heartbeat `failed`),
+    # never the app; the lease must not stay held.
+    from pipeline.entry import run_pipeline
+
+    def misconfigured_factory(name, settings=None):
+        raise ValueError("FOUNDRY_ENDPOINT is not configured")
+
+    monkeypatch.setattr(pipeline.entry, "get_field_extractor", misconfigured_factory)
+    with pytest.raises(ValueError, match="FOUNDRY_ENDPOINT"):
+        run_pipeline()
+    assert seams.released is True
+
+
+def test_process_mailbox_without_extractor_falls_back_to_regex():
+    # pipeline-core REQ-2 parity pinned (llm-extraction REQ-1.3): callers that
+    # omit the extractor still get regex fields.
+    from time import monotonic
+
+    body = "Localidad: Madrid Código Postal: 28001\nTomador: Nombre Apellido\n"
+    history = FakeHistory()
+    process_mailbox(
+        FakeGmail([_msg("m1", CLAIM_SUBJECT, 100, body=body)]),
+        FakeTrello(),
+        FakeMembretes(),
+        history,
+        deadline=monotonic() + RUN_DEADLINE_S,
+    )
+    record = history.rows["2026/417"]
+    assert record.town == "Madrid"
+    assert record.owner == "Nombre Apellido"
 
 
 def test_membrete_source_requires_blob_endpoint_under_managed_identity():

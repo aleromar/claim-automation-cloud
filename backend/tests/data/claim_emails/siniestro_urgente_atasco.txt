@@ -1,0 +1,216 @@
+DECLARACIÓN DE SINIESTRO URGENTE
+
+---------- Forwarded message ---------
+De: Colaboradores Hogar <colaboradores.hogar@notificaciones.asitur.es>
+Date: lun, 7 sept 2026 a las 8:40
+Subject: 2099/000014 Declaración de siniestro a colaborador URGENTE
+(H)Envio N-EXAMPL14
+To: agente.ejemplo <agente.ejemplo@example.com>
+
+
+Comunicación para: AGENTE EJEMPLO LOPEZ - VILLANUEVA
+
+[image: Imagen 1]
+
+Declaración de siniestro URGENTE
+
+Fecha de envío: 07/09/2026 Hora: 8:39
+
+Datos de la Entidad:
+
+Compañía: Reale
+
+N° Póliza: 817000000000014
+
+Referª. Cía: 817000000000114
+
+Referencia Asitur: 2099/000014
+
+Observaciones póliza: Modificada: 05/07/2026 16:59.
+
+Conditional XPath expression (./isExpatriate ) returned no results
+
+Datos del Asegurado:
+
+Tomador: TEODORO EJEMPLO CUARTO
+
+Nif: 00000014Z
+
+Producto: 817 Nuevo Producto Hogar Vacaciones 2022 Modalidad: Hogar
+
+Continente: 153.899,80 Contenido: 20.630,00
+
+Fecha efecto: 20/08/2025
+
+Datos del Siniestro:
+
+Dirección: CALLE FICTICIA 6
+
+Localidad: VILLANUEVA DE EJEMPLO
+
+Código Postal: 34998 Provincia: PALENCIA
+
+Tipo siniestro: Daños por agua
+
+Causa: Atasco
+
+Descripción: ATASCO DE TUBERÍA GENERAL DE LA CASA. CUANDO USAN ALGÚN
+SANITARIO REBOSAN AGUA LOS DEMÁS SIN DAÑOS.
+
+Tipo: Reparable
+
+Fecha Ocurrencia: 05/09/2026
+
+Daños Estéticos Continente : 2000 €
+
+Histórico de Siniestros:
+‎ Código : 209900000014 Fecha ocurrencia : 05/09/2026 Tipo Siniestro : Daños
+por agua Causa Siniestro : Atasco
+‎
+
+Implicados:
+
+
+‎ Asegurado: TEODORO EJEMPLO CUARTO
+‎   Email:
+‎   Dirección: CALLE FICTICIA 6
+‎   Tfno : 600000014 Franja1: 00:00 - 00:00 Franja2: -
+
+Garantías:
+
+
+‎ Garantía: (812) DAÑOS POR AGUA (CONTINENTE)
+‎   Observaciones: ¿Qué se cubre? Rotura de tuberías vistas aunque no hayan
+causado daños, hasta 300€/siniestro Gastos de localización y reparación en
+caso de corrosión de tuberías no vistas, hasta 600€/siniestro Daños por
+filtraciones internas, hasta 1500€ primer riesgo Cte Localización y
+reparación de fugas en piscinas y sus conducciones, estanques, pozos, redes
+de riego, hasta 300€/siniestro o Los daños y/o pérdidas materiales
+producidos por escapes de agua o roturas de conducciones, tuberías,
+aparatos y depósitos, cualquiera que sea la causa que los origine, propia o
+ajena, siempre que sea fortuita, incluida: - La omisión del cierre de
+llaves y grifos. - Las fugas provenientes de aparatos electrodomésticos,
+conectados a la red de suministro o evacuación. - Heladas. - Rotura de
+acuarios y peceras de más 50 litros. - Filtraciones internas, siempre y
+cuando se repare el origen de la filtración o Si se asegura el continente,
+quedarán también garantizados hasta los límites indicados en Condiciones
+Particulares: - Los gastos de búsqueda y localización de la rotura o atasco
+y los trabajos de fontanería necesarios para reparar o reponer las
+instalaciones privativas de la vivienda asegurada, aunque no hayan causado
+daños a los bienes asegurados. - La rotura de tuberías vistas, aunque no
+hayan causado daños. - Los gastos de localización y reparación en caso de
+corrosión de tubería que no esté a la vista, incluidos los gastos por daños
+estéticos derivados de las mismas. Cuando por el estado de corrosión
+generalizado no sea posible la reparación de la tubería afectada y sea
+necesaria la sustitución, se valorará una reparación puntual en concepto de
+fontanería. De producirse siniestros posteriores y no haberse efectuado las
+reparaciones necesarias, REALE quedará desligada de las obligaciones que
+para ella se derivan de esta garantía. - Filtraciones internas. - La
+localización y reparación de fugas en piscinas y sus conducciones,
+estanques, pozos o redes de riego. ¿Qué NO se cubre? o Los daños producidos
+en los propios aparatos electrodomésticos causantes del daño. o Los daños
+causados por falta de mantenimiento e impermeabilización de las terrazas. o
+Los daños por agua ocasionados por fenómenos atmosféricos o climatológicos,
+excepto las heladas. o Los daños producidos como consecuencia de la omisión
+de reparaciones indispensables para el normal estado de conservación de las
+instalaciones o para subsanar el desgaste notorio y conocido de las
+conducciones de agua, depósitos, aparatos desagües y cubiertas del inmueble
+asegurado. o Los daños causados por los trabajos de construcción o
+reparación en el edificio o vivienda. o Los daños derivados de la
+oxidación, humedad y condensación. o La reparación de radiadores, grifos,
+calderas, depósitos, termos, llaves de paso y similares. o Las filtraciones
+internas originadas desde el exterior por variaciones de los niveles
+freáticos
+‎   Cobertura: Limite: 153.899,80 €
+‎   Franquicia:
+‎   Clausulas:
+‎
+‎
+‎ Interviene:
+
+Rep. generales del hogar AGENTE EJEMPLO LOPEZ - VILLANUEVA Tfno: 600000000
+Email: agente.ejemplo@example.com Fecha Intervención: 07/09/2026
+‎
+
+Observaciones:
+
+** URGENTE ** CASOS DE CORROSION / VALORACION DE DAÑOS EN CONTENIDO
+(REPARABLE / INDEMNIZABLE) A PERITAR. PONGASE EN CONTACTO CON ASITUR PARA
+REALIZAR LA VIDEOPERITACIÓN
+‎ Les recordamos que de ser necesaria la intervención de camión cuba
+contacten VÍA TELEFONICA con Asitur para informar de ello y solicitar
+autorización.
+‎ Recuerde que es OBLIGATORIO introducir el PRESUPUESTO de la reparación en
+la web / Reparanet en TODOS LOS EXPEDIENTES.
+‎ CUADRO DE COBERTURAS:
+‎ Casuística: Atascos de Tuberías:
+‎ Localización/Reparación:
+‎ Cubierto con y sin daños, excepto Producto 813 Espanor
+‎ Cubierto Camión Cuba
+‎ D. Asegurado: SI
+‎ D. Perjudicado: SI
+‎ Casuística: Atascos de Arquetas, Sumideros, Colectores:
+‎ Localización/Reparación:
+‎ Cubierto con y sin daños, excepto Producto 813 Espanor
+‎ Cubierto Camión Cuba
+‎ D. Asegurado: SI
+‎ D. Perjudicado: SI
+‎ Casuística: Atascos de Bajantes Vistas:
+‎ Localización/Reparación:
+‎ Cubierto con y sin daños en general, consultar producto.
+‎ No cubierto en Producto 813 Espanor
+‎ Cubierto Camión Cuba
+‎ D. Asegurado: SI
+‎ D. Perjudicado: SI
+‎ Casuística: Atascos de Canalones:
+‎ Localización/Reparación:
+‎ Reparación sin daños: No cubierto en general, consultar producto.
+‎ Reparación con daños: SI
+‎ Camión Cuba: consultar
+‎ D. Asegurado: SI
+‎ D. Perjudicado: SI
+‎ Casuística: Atascos de Elementos Subterráneos (situados bajo la rasante
+de la edificación o dentro del Cte asegurado):
+‎ Localización/Reparación:
+‎ Reparación sin daños: No cubierto en general, consultar producto.
+‎ Reparación con daños: SI
+‎ Camión Cuba: En general sí, consultar producto.
+‎ D. Asegurado: SI
+‎ D. Perjudicado: SI
+‎ Casuística: Achique de agua
+‎ Localización/Reparación:
+‎ SI, cuando es por rotura o escape propio o de tercero.
+‎ NO, cuando es a través de ventanas, tejadas, suelos o puertas exteriores
+‎ D. Asegurado: _¿?
+‎ D. Perjudicado: _¿?
+‎ Casuística: Rotura de elementos por necesidades de Localización y/o
+Reparación:
+‎ Localización/Reparación:
+‎ Cubierta Reposición y Reparación, siempre que no se trate de negligencia
+y se avise previamente
+
+Conditional XPath expression (./HasTecnologico) returned more than one node
+
+Asistencia : ESTA POLIZA TIENE BRICOHOGAR Y ASISTENCIA, RECUERDE OFRECERLAS
+EN CASO DE NO COBERTURA, PRIMERO OFRECER BRICOHOGAR SI EL TRABAJO ESTA
+INCLUIDO
+
+
+
+-- 
+
+
+
+Este mensaje va dirigido, de manera exclusiva, a su destinatario y puede
+contener información confidencial y sujeta al secreto profesional, cuya
+divulgación no está permitida por Ley. En caso de haber recibido este
+mensaje por error, le rogamos que de forma inmediata, nos lo comunique
+mediante correo electrónico remitido a nuestra atención y proceda a su
+eliminación, así como a la de cualquier documento adjunto al mismo.
+Asimismo, le comunicamos que la distribución, copia o utilización de este
+mensaje, o de cualquier documento adjunto al mismo, cualquiera que fuera su
+finalidad, están prohibidas por la ley. En aras del cumplimiento del
+Reglamento (UE) 2016/679 del Parlamento Europeo y del Consejo, de 27 de
+abril de 2016, puede ejercer los derechos de acceso, rectificación,
+cancelación, limitación, oposición y portabilidad de manera gratuita
+mediante correo electrónico a: agente.ejemplo@example.com
