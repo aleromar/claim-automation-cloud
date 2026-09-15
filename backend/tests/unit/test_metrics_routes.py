@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import pytest
 
 from app.main import app
+from app.metrics_routes import ClaimOut
 from core.state_store import ClaimRecord, ErrorRun, HistoryTotals, get_state_store
 
 METRICS_PATH = "/api/metrics"
@@ -78,6 +79,14 @@ def test_metrics_returns_totals_and_claims(client, secrets, auth, fake_store):
     # Data minimization (Gate 3 W2): the subject carries personal names and
     # nothing renders it — it must not ship in the payload.
     assert "subject" not in first
+
+
+def test_claim_out_drops_extractor_provenance():
+    # llm-extraction REQ-4.2: the ledger gains `extractor_used`; the dashboard
+    # projection stays unchanged in v1 (Pydantic's default extra="ignore").
+    record = _claim("2026/3", datetime(2026, 9, 15, 8, 0, 0, tzinfo=UTC))
+    out = ClaimOut(**record.model_dump(exclude={"subject"}), extractor_used="llm")
+    assert "extractor_used" not in out.model_dump()
 
 
 def test_metrics_response_is_not_cacheable(client, secrets, auth):

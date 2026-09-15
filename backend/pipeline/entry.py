@@ -34,6 +34,7 @@ from pipeline.claim_data import (
     build_card_description,
     build_card_name,
 )
+from pipeline.extraction import get_field_extractor
 from pipeline.gmail_client import GmailClient
 from pipeline.membrete_source import BlobMembreteSource, MembreteSource
 from pipeline.pdf_gen import generate_pdf_from_email
@@ -281,12 +282,16 @@ def _build_membrete_source(settings: Settings) -> BlobMembreteSource:
 def run_pipeline() -> RunCounts:
     """The zero-arg wake contract: lease → compose → preflights → process.
     A held lease raises RunBusyError (scheduler classifies `skipped_busy`);
-    everything composed here is per-run (P12 by non-sharing) and closed on
-    every exit."""
+    everything composed here — clients and the field extractor alike — is
+    per-run (P12 by non-sharing; the lease confines a run to one thread) and
+    closed on every exit."""
     settings = get_settings()
     store = get_state_store()
     with store.run_lease():
         secrets = get_store()
+        # First: the one composition step that can fail on config alone
+        # (llm without an endpoint, REQ-1.2) — fail before opening clients.
+        extractor = get_field_extractor(settings.field_extractor_backend, settings)
         gmail = GmailClient(settings, secrets)
         trello = TrelloClient(settings, secrets, store.read_trello_config())
         try:
@@ -298,9 +303,13 @@ def run_pipeline() -> RunCounts:
                 _build_membrete_source(settings),
                 store,
                 deadline=monotonic() + RUN_DEADLINE_S,
+                extractor=extractor,
             )
         finally:
             try:
                 gmail.close()
             finally:
-                trello.close()
+                try:
+                    trello.close()
+                finally:
+                    extractor.close()

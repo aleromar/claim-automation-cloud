@@ -33,7 +33,15 @@ class Settings(BaseSettings):
     tables_endpoint: str | None = None  # required when table_storage_backend == "managed_identity"
     cors_allowed_origin: str | None = None
     jwt_ttl_hours: int = Field(default=8, gt=0)
-    field_extractor_backend: Literal["regex"] = "regex"  # 5a2 registers "llm"
+    # Closed set: must equal the registry keys in pipeline.extraction — a typo
+    # fails at startup, not at the first email.
+    field_extractor_backend: Literal["regex", "llm"] = "regex"
+    # Foundry settings are consumed by the llm branch of get_field_extractor
+    # only; no validator on purpose — a missing endpoint under `llm` fails the
+    # RUN at composition, never the app (llm-extraction REQ-1.2, the 5c rule).
+    foundry_endpoint: str | None = None  # https://<account>.cognitiveservices.azure.com/openai/v1/
+    foundry_deployment: str = "gpt-5-mini"
+    llm_capture_content: bool = True  # prompt + answer on the gen_ai spans (REQ-5.2)
     membretes_container: str = "membretes"  # private Blob container (D26, amended)
     # Consumed by 5c's composition root when it builds the BlobMembreteSource;
     # no validator yet — a hard requirement would break the deployed app before

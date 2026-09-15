@@ -25,6 +25,10 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.64b0",
     "opentelemetry-instrumentation-httpx>=0.64b0",
     "azure-core-tracing-opentelemetry>=1.0.0b13",
+    # llm-extraction (D29): the one exact pin in this file — Pydantic AI ships
+    # weekly and has already moved constructor kwargs between majors; the
+    # extractor is written against this version's API (spec Design).
+    "pydantic-ai-slim[openai]==2.43.0",
 ]
 
 [dependency-groups]
@@ -33,11 +37,21 @@ dev = [
     "ruff>=0.9",
     "respx>=0.23.1",
     "anyio>=4",
+    # llm-extraction REQ-6: eval harness (same pin as the runtime) + cassettes.
+    "pydantic-evals==2.43.0",
+    "pytest-recording>=0.13.4",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# llm-extraction REQ-6.4: the live tier is never collected by default —
+# `pytest -m llm_live` on the command line overrides this `-m`.
+markers = [
+    "llm_replay: Tier 2 — replays recorded Foundry answers from tests/cassettes (socket-free)",
+    "llm_live: Tier 3 — calls the staging Foundry deployment; nightly workflow only",
+]
+addopts = "--strict-markers -m 'not llm_live'"
 
 [tool.ruff]
 line-length = 100

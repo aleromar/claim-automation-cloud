@@ -21,13 +21,12 @@ from pathlib import Path
 import pytest
 
 from pipeline.claim_data import ClaimData, ClaimType
-from pipeline.extraction import ClaimFields, RegexFieldExtractor
+from pipeline.extraction import CLAIM_VALUE_FIELDS, ClaimFields, RegexFieldExtractor
 
 CASES_DIR = Path(__file__).parent.parent / "data" / "claim_emails"
 MANIFEST = json.loads((CASES_DIR / "cases.json").read_text(encoding="utf-8"))
 CASES = MANIFEST["cases"]
 CASE_IDS = [case["slug"] for case in CASES]
-FIELDS = list(ClaimFields.model_fields)
 
 # The insurer's system sender is the one non-placeholder address allowed to survive.
 INSURER_SENDER = "colaboradores.hogar@notificaciones.asitur.es"
@@ -117,8 +116,8 @@ def test_classifies_and_identifies_as_expected(case):
 
 @pytest.mark.parametrize(
     "case,field",
-    [(case, field) for case in CASES for field in FIELDS],
-    ids=[f"{case['slug']}-{field}" for case in CASES for field in FIELDS],
+    [(case, field) for case in CASES for field in CLAIM_VALUE_FIELDS],
+    ids=[f"{case['slug']}-{field}" for case in CASES for field in CLAIM_VALUE_FIELDS],
 )
 def test_regex_baseline_against_gold(case, field):
     got = _normalize(getattr(_regex_fields(case, _part(case, "txt")), field))
@@ -141,5 +140,5 @@ def test_converter_on_html_part_gives_the_same_regex_outcome(case):
     via_html = _regex_fields(case, ClaimData._html_to_plain(_part(case, "html")))
     via_text = _regex_fields(case, _part(case, "txt"))
 
-    for field in FIELDS:
+    for field in CLAIM_VALUE_FIELDS:
         assert _normalize(getattr(via_html, field)) == _normalize(getattr(via_text, field)), field
