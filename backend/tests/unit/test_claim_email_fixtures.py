@@ -36,6 +36,7 @@ from llm_eval import (
     CASES_DIR,
     Outcome,
     assert_asymmetric_gate,
+    assert_only_placeholders,
     build_dataset,
     case_body,
     discordant_pairs,
@@ -58,9 +59,6 @@ from pipeline.extraction import CLAIM_VALUE_FIELDS, EXTRACTOR_LLM, ClaimFields, 
 from pipeline.llm_extraction import SUBJECT_CLOSE, SUBJECT_OPEN, LlmFieldExtractor
 
 CASE_IDS = [case["slug"] for case in CASES]
-
-# The insurer's system sender is the one non-placeholder address allowed to survive.
-INSURER_SENDER = "colaboradores.hogar@notificaciones.asitur.es"
 
 _part = part
 _normalize = normalize
@@ -96,15 +94,7 @@ def test_both_mime_parts_exist(case):
 def test_no_pii_leaked_back_into_fixture(case):
     """Every identifier-shaped token must be a placeholder. Re-saving a real email
     over a fixture reintroduces real phones/NIFs/addresses and fails here."""
-    text = _part(case, "txt") + _part(case, "html")
-    for phone in re.findall(r"\b[6789]\d{8}\b", text):
-        assert phone.startswith(("600000", "900000")), phone
-    for nif in re.findall(r"\b\d{8}[A-Z]\b", text):
-        assert nif.startswith("000000"), nif
-    for address in re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", text):
-        assert address.endswith("@example.com") or address == INSURER_SENDER, address
-    for year in re.findall(r"\b(20\d\d)/\d{5,}\b", text):
-        assert year.startswith("209"), year
+    assert_only_placeholders(_part(case, "txt") + _part(case, "html"))
 
 
 @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)

@@ -64,6 +64,24 @@ class Outcome(StrEnum):
     MISMATCH = "mismatch"  # both present, different
 
 
+# The insurer's system sender is the one non-placeholder address allowed to survive.
+INSURER_SENDER = "colaboradores.hogar@notificaciones.asitur.es"
+
+
+def assert_only_placeholders(text: str) -> None:
+    """PII tripwire shared by the fixtures and the cassettes: every
+    identifier-shaped token must be a placeholder (phones 600000xxx/900000xxx,
+    NIFs 000000xxL, e-mails @example.com, claim years 209x)."""
+    for phone in re.findall(r"\b[6789]\d{8}\b", text):
+        assert phone.startswith(("600000", "900000")), phone
+    for nif in re.findall(r"\b\d{8}[A-Z]\b", text):
+        assert nif.startswith("000000"), nif
+    for address in re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", text):
+        assert address.endswith("@example.com") or address == INSURER_SENDER, address
+    for year in re.findall(r"\b(20\d\d)/\d{5,}\b", text):
+        assert year.startswith("209"), year
+
+
 def part(case: dict, ext: str) -> str:
     return (CASES_DIR / f"{case['slug']}.{ext}").read_text(encoding="utf-8")
 
