@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
@@ -211,11 +211,15 @@ test("all six claim types flow through the real pipeline in one run", async ({
   if (await runFailed.isVisible()) {
     throw new Error("process-now returned an error — run-failure alert shown");
   }
-  // Recorded on every run so the regex and llm figures sit side by side in the
-  // job logs; asserted so a cold-start regression after the flip is red.
-  console.log(
-    `process-now wall time: ${processNowElapsedMs} ms (budget ${PROCESS_NOW_BUDGET_MS} ms)`,
-  );
+  // Recorded on every run so the regex and llm figures sit side by side;
+  // asserted so a cold-start regression after the flip is red. Playwright's
+  // CI (dot) reporter swallows test stdout, so the figure also goes to the
+  // GitHub job summary when one exists.
+  const wallTimeLine = `process-now wall time: ${processNowElapsedMs} ms (budget ${PROCESS_NOW_BUDGET_MS} ms)`;
+  console.log(wallTimeLine);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${wallTimeLine}\n`);
+  }
   expect(
     processNowElapsedMs,
     `process-now took ${processNowElapsedMs} ms — over baseline ` +
