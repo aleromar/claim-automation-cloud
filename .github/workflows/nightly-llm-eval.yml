@@ -1,0 +1,51 @@
+# llm-extraction REQ-6.4, Tier 3: the five anonymized fixtures against the
+# STAGING Foundry deployment, nightly, reporting-only. It gates nothing — no
+# deploy depends on it; a red run is a signal to look, not a block. The
+# per-field report, the regex comparison column and the discordant pairs land
+# in the job summary (written by the test via $GITHUB_STEP_SUMMARY).
+#
+# Identity: `environment: staging` gives the OIDC token the environment:staging
+# subject (the app-staging federated credential); the app-CI principal holds
+# Cognitive Services OpenAI User on the staging account only (infra repo).
+# FOUNDRY_ENDPOINT is a staging GitHub environment variable copied from the
+# infra deployment's `foundryEndpoint` output.
+#
+# GitHub disables `schedule` after 60 days without repository activity; a
+# `workflow_dispatch` run re-enables it.
+name: nightly-llm-eval
+
+on:
+  schedule:
+    - cron: "17 4 * * *" # 04:17 UTC daily — off the hour, after the D27 digest
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  llm-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    env:
+      FOUNDRY_ENDPOINT: ${{ vars.FOUNDRY_ENDPOINT }}
+      PYDANTIC_AI_NO_BANNER: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - run: uv sync
+        working-directory: backend
+
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Tier 3 — live eval against staging (reporting-only)
+        working-directory: backend
+        run: uv run pytest tests/live -m llm_live -q -p no:cacheprovider

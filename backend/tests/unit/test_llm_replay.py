@@ -166,3 +166,45 @@ def test_cassette_is_scrubbed_of_infra_identifiers(case):
 def test_cassette_holds_only_placeholders(case):
     # The fixture PII tripwire, over the cassettes too (REQ-6.4).
     assert_only_placeholders(_cassette_path(case).read_text(encoding="utf-8"))
+
+
+# --- Tier 3 wiring guards: the live tier is opt-in, and the nightly runs only it ---
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+NIGHTLY_WORKFLOW = BACKEND_DIR.parent / ".github" / "workflows" / "nightly-llm-eval.yml"
+
+
+def test_live_tier_is_never_collected_by_default():
+    """REQ-6.4 T3: `addopts` deselects `llm_live`, so `make test`/CI never call
+    Foundry; the nightly opts in with `-m llm_live` (fresh interpreter, default opts)."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests/live"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=BACKEND_DIR,
+    )
+    assert out.returncode in (0, 5), out.stderr  # 5 = "no tests collected" after deselection
+    assert "test_llm_live.py::" not in out.stdout, out.stdout
+    assert "deselected" in out.stdout, out.stdout
+
+
+def test_nightly_workflow_runs_only_the_live_tier_against_staging():
+    """REQ-6.4 T3: scheduled + dispatchable, `environment: staging` (OIDC subject
+    → the app-CI federated credential), Foundry endpoint from a GitHub variable,
+    the live marker selected explicitly, and it gates nothing (no `needs`)."""
+    workflow = yaml.safe_load(NIGHTLY_WORKFLOW.read_text(encoding="utf-8"))
+    triggers = workflow[True] if True in workflow else workflow["on"]  # YAML parses `on` as True
+    assert "schedule" in triggers and "workflow_dispatch" in triggers
+    assert workflow["permissions"]["id-token"] == "write"
+    (job,) = workflow["jobs"].values()
+    assert job["environment"] == "staging"
+    assert "needs" not in job
+    assert job["env"]["FOUNDRY_ENDPOINT"] == "${{ vars.FOUNDRY_ENDPOINT }}"
+    steps = job["steps"]
+    assert any(step.get("uses", "").startswith("azure/login@") for step in steps)
+    run_steps = [step["run"] for step in steps if "run" in step]
+    assert any("tests/live" in run and "-m llm_live" in run for run in run_steps), run_steps
