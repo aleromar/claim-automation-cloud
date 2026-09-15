@@ -42,6 +42,18 @@ class ExtractorUsed(StrEnum):
     REGEX_FALLBACK = "regex_fallback"
 
 
+class FailureClass(StrEnum):
+    """Why an LLM call fell back to regex (llm-extraction REQ-3.1) — the KQL
+    dimension's closed set. OTHER is a suspected bug, not weather."""
+
+    CONTENT_FILTER = "content_filter"
+    TRUNCATION = "truncation"
+    VALIDATION_FAILED = "validation_failed"
+    TIMEOUT = "timeout"
+    HTTP_ERROR = "http_error"
+    OTHER = "other"
+
+
 class ClaimFields(BaseModel):
     """The per-type optional fields an extractor produces, plus provenance."""
 
