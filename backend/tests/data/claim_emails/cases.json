@@ -42,6 +42,7 @@
         "observaciones": null
       },
       "regex_known_failures": ["description"],
+      "llm_known_failures": [],
       "notes": "First real asistencia sample. Layout differs from siniestros: no 'Tipo:' line after Descripción, Implicados has no 'Asegurado:' label, an empty 'Observaciones:' footer. The regex description anchor 'Tipo:' therefore matches the Implicados 'Tipo: Móvil' and swallows the Implicados block."
     },
     {
@@ -61,6 +62,7 @@
         "observaciones": "Buemos días disponen de ip por parte del perito? Gracias"
       },
       "regex_known_failures": [],
+      "llm_known_failures": [],
       "notes": "Real comunicación, full layout (Datos de la Entidad/Asegurado/Siniestro, two implicados, Interviene with a third-party perito). Typo 'Buemos' is in the source. Prior-year claim reference (2098 stands in for 2025)."
     },
     {
@@ -80,6 +82,7 @@
         "observaciones": "No logramos contacto con reparador Solicitamos informen si han acudido a tapar catas"
       },
       "regex_known_failures": [],
+      "llm_known_failures": [],
       "notes": "Second real comunicación; observaciones wraps over two lines in the .txt (Gmail hard wrap)."
     },
     {
@@ -99,6 +102,7 @@
         "observaciones": null
       },
       "regex_known_failures": [],
+      "llm_known_failures": [],
       "notes": "Hogar (not Comunidades) URGENTE with a filled Histórico de Siniestros, a long Garantías block, a '** URGENTE **' Observaciones section and a CUADRO DE COBERTURAS. Multi-word town. Description wraps over two lines in the .txt."
     },
     {
@@ -118,6 +122,7 @@
         "observaciones": null
       },
       "regex_known_failures": [],
+      "llm_known_failures": [],
       "notes": "Hogar NORMAL with Asegurado and Perjudicado at different floors of the same street (address disambiguation case: siniestro/asegurado 2º DCHA vs perjudicado 1º DCHA), two Garantías, empty Histórico."
     }
   ]
