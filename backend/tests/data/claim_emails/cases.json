@@ -124,6 +124,26 @@
       "regex_known_failures": [],
       "llm_known_failures": [],
       "notes": "Hogar NORMAL with Asegurado and Perjudicado at different floors of the same street (address disambiguation case: siniestro/asegurado 2º DCHA vs perjudicado 1º DCHA), two Garantías, empty Histórico."
+    },
+    {
+      "slug": "siniestro_direccion_en_blanco",
+      "subject": "2099/000016 Declaración de siniestro a colaborador NORMAL (H)Envio N-EXAMPL16",
+      "claim_type": "DECLARACION_SINIESTRO",
+      "year": "2099",
+      "claim_number": "000016",
+      "gold": {
+        "insurance_company": "Reale",
+        "nif": "00000016A",
+        "address": "CALLE FALSA 1º C",
+        "phone_number": "600000016",
+        "town": "VILLANUEVA",
+        "description": "VECINA DE ABAJO TIENE DAÑOS AGUA EN TECHOS DE LOS BAÑOS CONTACTO: CONTACTO_A EJEMPLO ¿611 11 11 11 CONTACTO PERJ.: CONTACTO_B EJEMPLO 1ºC - +34 622 22 22 22",
+        "owner_name": "JUAN PEREZ EJEMPLO",
+        "observaciones": null
+      },
+      "regex_known_failures": ["address"],
+      "llm_known_failures": [],
+      "notes": "Synthetic, derived from tests/data/asitur_xhtml_sample.html (the production text/plain-that-is-XHTML shape — .html is the XHTML, .txt is the converter's output, i.e. exactly what the LLM sees under arm a). Added 2026-09-15 after the staging live run: the siniestro 'Dirección:' line is BLANK and the field rule says to fall back to the Asegurado's 'Dirección:' under Implicados; the model returned null on the first live run (the five real fixtures all have a filled siniestro address, so the rule was never exercised). Regex returns '' here (its anchor matches the blank line), hence regex_known_failures=address. Description spans three lines up to 'Tipo:' (hard wraps joined)."
     }
   ]
 }
