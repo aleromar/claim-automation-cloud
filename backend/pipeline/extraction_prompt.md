@@ -20,8 +20,10 @@ Field rules (the section headings are "Datos de la Entidad", "Datos del Asegurad
 - nif: the value after "Nif:" in Datos del Asegurado.
 - owner_name: the value after "Tomador:" in Datos del Asegurado, verbatim (keep the
   surname-comma-name order if that is how it is written).
-- address: the value after "Dirección:" in Datos del Siniestro. Only when that line is blank,
-  use the Asegurado's "Dirección:" inside Implicados.
+- address: the value after "Dirección:" in Datos del Siniestro. When that line has no value
+  (nothing after "Dirección:"), you MUST return instead the "Dirección:" that follows
+  "Asegurado:" inside Implicados (for an asistencia, the single implicado's address line).
+  Return null only if both are empty. Never use the Perjudicado's or Interviene's address.
 - town: the value after "Localidad:" in Datos del Siniestro, stopping before "Código Postal:"
   or "Provincia:".
 - phone_number: the Asegurado's "Tfno" inside Implicados (for an asistencia there is a single

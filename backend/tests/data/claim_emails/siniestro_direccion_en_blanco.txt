@@ -1,0 +1,115 @@
+Comunicación para: AGENTE EJEMPLO LOPEZ - VILLANUEVA
+
+Declaración de siniestro NORMAL
+
+Fecha de envío: 26/05/2026 Hora: 17:16
+
+Datos de la Entidad:
+
+Compañía: Reale
+
+N° Póliza: 0000000000000
+
+Referª. Cía: 0000000000001
+
+Referencia Asitur: 2099/000016
+
+Observaciones póliza: MODIFICADA: 20260107 12:50
+
+Conditional XPath expression (./isExpatriate ) returned no results
+
+Datos del Asegurado:
+
+Tomador: JUAN PEREZ EJEMPLO
+
+Nif: 00000016A
+
+Producto: (817) 817-REA-03 HOGAR PRINCIPAL Modalidad: Hogar
+
+Continente: 135.916,28 Contenido: 19.118,84
+
+Fecha efecto: 15/02/2017
+
+Datos del Siniestro:
+
+Dirección:
+
+Localidad: VILLANUEVA
+
+Código Postal: 99999 Provincia: PALENCIA
+
+Tipo siniestro: Daños por agua
+
+Causa: Otras Causas
+
+Descripción: VECINA DE ABAJO TIENE DAÑOS AGUA EN TECHOS DE LOS BAÑOS
+CONTACTO: CONTACTO_A EJEMPLO ¿611 11 11 11
+CONTACTO PERJ.: CONTACTO_B EJEMPLO 1ºC - +34 622 22 22 22
+
+Tipo: Reparable
+
+Fecha Ocurrencia: 26/05/2026
+
+Daños Estéticos Continente : 1500 €
+
+Histórico de Siniestros:
+‎ Código : 209900000000 Fecha ocurrencia : 26/05/2026 Tipo Siniestro : Daños por agua Causa Siniestro : Otras Causas
+‎
+
+Implicados:
+
+‎ Asegurado: JUAN PEREZ EJEMPLO
+‎   Email:
+‎   Dirección: CALLE FALSA 1º C
+‎   Tfno : 600000016 Franja1: 09:00 - 20:00 Franja2: -
+
+Garantías:
+
+‎ Interviene:
+
+Rep. generales del hogar AGENTE EJEMPLO LOPEZ - VILLANUEVA Tfno: 600000000 Email: agente.ejemplo@example.com Fecha Intervención: 26/05/2026
+‎
+
+Observaciones:
+
+CASOS DE CORROSION / VALORACION DE DAÑOS EN CONTENIDO (REPARABLE / INDEMNIZABLE) A PERITAR. PONGASE EN CONTACTO CON ASITUR PARA REALIZAR LA VIDEOPERITACIÓN
+‎ Les recordamos que de ser necesaria la intervención de camión cuba contacten VÍA TELEFONICA con Asitur para informar de ello y solicitar autorización.
+‎ Recuerde que es OBLIGATORIO introducir el PRESUPUESTO de la reparación en la web / Reparanet en TODOS LOS EXPEDIENTES.
+‎ CUADRO DE COBERTURAS:
+‎ Casuística: Condensaciones
+‎ Localización/Reparación:
+‎ NO
+‎ D. Asegurado: NO
+‎ D. Perjudicado: SI
+‎ Casuística: Rotura de elementos por necesidades de Localización y/o Reparación:
+‎ Localización/Reparación:
+‎ Cubierta Reposición y Reparación, siempre que no se trate de negligencia y se avise previamente
+‎ D. Asegurado: ¿?
+‎ D. Perjudicado: ¿?
+‎ Casuística: Calefacción Central; habiendo que vaciar el circuito para reparar, como se consideran:
+‎ Localización/Reparación:
+‎ Tuberías: Consultar
+‎ Radiadores de uso Privativo: consultar
+‎ Llaves de paso o purgadores: consultar
+‎ Casuística: Radiadores en sistemas de calefacción privativo.
+‎ Localización/Reparación:
+‎ Se consideran como accesorios o aparatos, no tienen consideración de Tubería.
+‎ NO tiene cobertura la reparación sin/con Daños
+‎ NO tiene cobertura la sustitución en caso de no ser posible una reparación
+‎ D. Asegurado: SI
+‎ D. Perjudicado: SI
+‎ Casuística: Calderas, termos o calentadores, situados dentro o fuera de la vivienda y de uso privativo:
+‎ Localización/Reparación:
+‎ No tienen consideración de Tubería.
+‎ No tiene cobertura la Reparación sin/con Daños
+‎ NO tiene cobertura la sustitución en caso de no ser posible una reparación
+‎ D. Asegurado: SI
+‎ D. Perjudicado: SI
+
+Otros datos de interés:
+
+Usos Rep. Electrodomésticos: 0 Usos BricoHogar: 2
+
+Conditional XPath expression (./HasTecnologico) returned more than one node
+
+Asistencia : ESTA POLIZA TIENE BRICOHOGAR Y ASISTENCIA, RECUERDE OFRECERLAS EN CASO DE NO COBERTURA, PRIMERO OFRECER BRICOHOGAR SI EL TRABAJO ESTA INCLUIDO

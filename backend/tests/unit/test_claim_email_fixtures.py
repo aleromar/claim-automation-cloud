@@ -163,6 +163,7 @@ def test_converter_on_html_part_gives_the_same_regex_outcome(case):
 
 SINIESTRO_SLUG = "siniestro_normal_tuberia"
 ASISTENCIA_SLUG = "asistencia_envio_profesionales"
+BLANK_ADDRESS_SLUG = "siniestro_direccion_en_blanco"
 
 
 def _case(slug: str) -> dict:
@@ -338,8 +339,13 @@ def test_regex_column_restates_the_regex_tripwire():
 def test_discordant_pairs_report_direction():
     llm = outcomes_by_case(run_eval(gold_answering_extractor(CASES), CASES, ARM_PLAIN))
     pairs = discordant_pairs(llm, regex_column(CASES))
-    # The one discordant pair known today: the asistencia description, favouring the LLM.
-    assert pairs == [(ASISTENCIA_SLUG, "description", "llm")]
+    # The discordant pairs known today, both favouring the LLM: the asistencia
+    # description (regex's `Tipo:` anchor) and the blank-siniestro-address case
+    # (regex captures the blank line; the rule says use the Asegurado's).
+    assert set(pairs) == {
+        (ASISTENCIA_SLUG, "description", "llm"),
+        (BLANK_ADDRESS_SLUG, "address", "llm"),
+    }
     extractor = _perturbing_extractor(CASES, SINIESTRO_SLUG, "town", None)
     llm = outcomes_by_case(run_eval(extractor, CASES, ARM_PLAIN))
     assert (SINIESTRO_SLUG, "town", "regex") in discordant_pairs(llm, regex_column(CASES))

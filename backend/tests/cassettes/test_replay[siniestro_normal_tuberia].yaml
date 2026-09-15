@@ -19,8 +19,11 @@ interactions:
       in Datos de la Entidad.\\n- nif: the value after \\\"Nif:\\\" in Datos del Asegurado.\\n-
       owner_name: the value after \\\"Tomador:\\\" in Datos del Asegurado, verbatim
       (keep the\\n  surname-comma-name order if that is how it is written).\\n- address:
-      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. Only when that
-      line is blank,\\n  use the Asegurado's \\\"Direcci\xF3n:\\\" inside Implicados.\\n-
+      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. When that line
+      has no value\\n  (nothing after \\\"Direcci\xF3n:\\\"), you MUST return instead
+      the \\\"Direcci\xF3n:\\\" that follows\\n  \\\"Asegurado:\\\" inside Implicados
+      (for an asistencia, the single implicado's address line).\\n  Return null only
+      if both are empty. Never use the Perjudicado's or Interviene's address.\\n-
       town: the value after \\\"Localidad:\\\" in Datos del Siniestro, stopping before
       \\\"C\xF3digo Postal:\\\"\\n  or \\\"Provincia:\\\".\\n- phone_number: the Asegurado's
       \\\"Tfno\\\" inside Implicados (for an asistencia there is a single\\n  implicado
@@ -130,7 +133,7 @@ interactions:
       connection:
       - keep-alive
       content-length:
-      - '10091'
+      - '10310'
       content-type:
       - application/json
       user-agent:
@@ -157,19 +160,18 @@ interactions:
     uri: https://foundry.example/openai/v1/chat/completions
   response:
     body:
-      string: "{\"choices\":[{\"content_filter_result\":{\"error\":{\"code\":\"content_filter_error\",\"message\":\"The
-        contents are not filtered\"}},\"content_filter_results\":{\"hate\":{\"filtered\":false,\"severity\":\"safe\"},\"protected_material_code\":{\"detected\":false,\"filtered\":false},\"protected_material_text\":{\"detected\":false,\"filtered\":false},\"self_harm\":{\"filtered\":false,\"severity\":\"safe\"},\"sexual\":{\"filtered\":false,\"severity\":\"safe\"},\"violence\":{\"filtered\":false,\"severity\":\"safe\"}},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null,\"message\":{\"annotations\":[],\"content\":\"{\\\"insurance_company\\\":\\\"Reale\\\",\\\"nif\\\":\\\"00000015S\\\",\\\"address\\\":\\\"AVENIDA
+      string: "{\"choices\":[{\"content_filter_results\":{\"hate\":{\"filtered\":false,\"severity\":\"safe\"},\"protected_material_code\":{\"detected\":false,\"filtered\":false},\"protected_material_text\":{\"detected\":false,\"filtered\":false},\"self_harm\":{\"filtered\":false,\"severity\":\"safe\"},\"sexual\":{\"filtered\":false,\"severity\":\"safe\"},\"violence\":{\"filtered\":false,\"severity\":\"safe\"}},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null,\"message\":{\"annotations\":[],\"content\":\"{\\\"insurance_company\\\":\\\"Reale\\\",\\\"nif\\\":\\\"00000015S\\\",\\\"address\\\":\\\"AVENIDA
         FICTICIA 8 2\xBA DCHA\\\",\\\"phone_number\\\":\\\"600000015\\\",\\\"town\\\":\\\"VILLANUEVA\\\",\\\"description\\\":\\\"posible
         rotura de tuber\xEDa de calefacci\xF3n empotrada causando da\xF1os al piso
         inferior da\xF1ando techo de una habitaci\xF3n y techo de pasillo\\\",\\\"owner_name\\\":\\\"ENCARNA
-        EJEMPLO QUINTA\\\"}\",\"refusal\":null,\"role\":\"assistant\"}}],\"created\":1789462164,\"id\":\"chatcmpl-EOJ8utUCt6uJLnXQywgmhEqCIgI1h\",\"model\":\"gpt-5-mini-2025-08-07\",\"object\":\"chat.completion\",\"prompt_filter_results\":[{\"prompt_index\":0,\"content_filter_results\":{\"hate\":{\"filtered\":false,\"severity\":\"safe\"},\"jailbreak\":{\"detected\":false,\"filtered\":false},\"self_harm\":{\"filtered\":false,\"severity\":\"safe\"},\"sexual\":{\"filtered\":false,\"severity\":\"safe\"},\"violence\":{\"filtered\":false,\"severity\":\"safe\"}}}],\"routing\":{\"serving_pipereplica\":\"d20260817160822-45b824db-default-r2-dp0-default\"},\"service_tier\":\"default\",\"system_fingerprint\":null,\"usage\":{\"completion_tokens\":107,\"completion_tokens_details\":{\"accepted_prediction_tokens\":0,\"audio_tokens\":0,\"reasoning_tokens\":0,\"rejected_prediction_tokens\":0},\"latency_checkpoint\":{\"engine_tbt_ms\":8,\"engine_ttft_ms\":32,\"engine_ttlt_ms\":919,\"pre_inference_ms\":118,\"service_tbt_ms\":8,\"service_ttft_ms\":269,\"service_ttlt_ms\":1152,\"user_visible_ttft_ms\":151},\"prompt_tokens\":2621,\"prompt_tokens_details\":{\"audio_tokens\":0,\"cached_tokens\":2560},\"total_tokens\":2728}}\n"
+        EJEMPLO QUINTA\\\"}\",\"refusal\":null,\"role\":\"assistant\"}}],\"created\":1789474689,\"id\":\"chatcmpl-EOMOvu7rVp3AoCjyaD0A2qiOIFLYO\",\"model\":\"gpt-5-mini-2025-08-07\",\"object\":\"chat.completion\",\"prompt_filter_results\":[{\"prompt_index\":0,\"content_filter_results\":{\"hate\":{\"filtered\":false,\"severity\":\"safe\"},\"jailbreak\":{\"detected\":false,\"filtered\":false},\"self_harm\":{\"filtered\":false,\"severity\":\"safe\"},\"sexual\":{\"filtered\":false,\"severity\":\"safe\"},\"violence\":{\"filtered\":false,\"severity\":\"safe\"}}}],\"routing\":{\"serving_pipereplica\":\"d20260817160822-45b824db-default-r2-dp0-default\"},\"service_tier\":\"default\",\"system_fingerprint\":null,\"usage\":{\"completion_tokens\":107,\"completion_tokens_details\":{\"accepted_prediction_tokens\":0,\"audio_tokens\":0,\"reasoning_tokens\":0,\"rejected_prediction_tokens\":0},\"latency_checkpoint\":{\"engine_tbt_ms\":8,\"engine_ttft_ms\":58,\"engine_ttlt_ms\":996,\"pre_inference_ms\":484,\"service_tbt_ms\":8,\"service_ttft_ms\":718,\"service_ttlt_ms\":1615,\"user_visible_ttft_ms\":234},\"prompt_tokens\":2672,\"prompt_tokens_details\":{\"audio_tokens\":0,\"cached_tokens\":0},\"total_tokens\":2779}}\n"
     headers:
       content-length:
-      - '1975'
+      - '1864'
       content-type:
       - application/json
       date:
-      - Tue, 15 Sep 2026 08:49:23 GMT
+      - Tue, 15 Sep 2026 12:18:08 GMT
       server:
       - istio-envoy
       skip-error-remapping:
@@ -181,7 +183,7 @@ interactions:
       x-content-type-options:
       - nosniff
       x-request-id:
-      - b7a9b9df-95f1-4bca-b477-f8be923db947
+      - 146b095a-5761-46b6-8753-f24e268bd69c
     status:
       code: 200
       message: OK

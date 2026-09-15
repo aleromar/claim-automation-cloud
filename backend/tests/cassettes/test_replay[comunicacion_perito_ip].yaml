@@ -19,8 +19,11 @@ interactions:
       in Datos de la Entidad.\\n- nif: the value after \\\"Nif:\\\" in Datos del Asegurado.\\n-
       owner_name: the value after \\\"Tomador:\\\" in Datos del Asegurado, verbatim
       (keep the\\n  surname-comma-name order if that is how it is written).\\n- address:
-      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. Only when that
-      line is blank,\\n  use the Asegurado's \\\"Direcci\xF3n:\\\" inside Implicados.\\n-
+      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. When that line
+      has no value\\n  (nothing after \\\"Direcci\xF3n:\\\"), you MUST return instead
+      the \\\"Direcci\xF3n:\\\" that follows\\n  \\\"Asegurado:\\\" inside Implicados
+      (for an asistencia, the single implicado's address line).\\n  Return null only
+      if both are empty. Never use the Perjudicado's or Interviene's address.\\n-
       town: the value after \\\"Localidad:\\\" in Datos del Siniestro, stopping before
       \\\"C\xF3digo Postal:\\\"\\n  or \\\"Provincia:\\\".\\n- phone_number: the Asegurado's
       \\\"Tfno\\\" inside Implicados (for an asistencia there is a single\\n  implicado
@@ -74,7 +77,7 @@ interactions:
       connection:
       - keep-alive
       content-length:
-      - '5525'
+      - '5744'
       content-type:
       - application/json
       user-agent:
@@ -102,14 +105,14 @@ interactions:
   response:
     body:
       string: "{\"choices\":[{\"content_filter_results\":{\"hate\":{\"filtered\":false,\"severity\":\"safe\"},\"protected_material_code\":{\"detected\":false,\"filtered\":false},\"protected_material_text\":{\"detected\":false,\"filtered\":false},\"self_harm\":{\"filtered\":false,\"severity\":\"safe\"},\"sexual\":{\"filtered\":false,\"severity\":\"safe\"},\"violence\":{\"filtered\":false,\"severity\":\"safe\"}},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null,\"message\":{\"annotations\":[],\"content\":\"{\\\"observaciones\\\":\\\"Buemos
-        d\xEDas disponen de ip por parte del perito? Gracias\\\"}\",\"refusal\":null,\"role\":\"assistant\"}}],\"created\":1789462158,\"id\":\"chatcmpl-EOJ8oiq2rvYBqN13JzwT7W1FVfoYD\",\"model\":\"gpt-5-mini-2025-08-07\",\"object\":\"chat.completion\",\"prompt_filter_results\":[{\"prompt_index\":0,\"content_filter_results\":{\"hate\":{\"filtered\":false,\"severity\":\"safe\"},\"jailbreak\":{\"detected\":false,\"filtered\":false},\"self_harm\":{\"filtered\":false,\"severity\":\"safe\"},\"sexual\":{\"filtered\":false,\"severity\":\"safe\"},\"violence\":{\"filtered\":false,\"severity\":\"safe\"}}}],\"routing\":{\"serving_pipereplica\":\"d20260817160822-45b824db-default-r2-dp0-default\"},\"service_tier\":\"default\",\"system_fingerprint\":null,\"usage\":{\"completion_tokens\":34,\"completion_tokens_details\":{\"accepted_prediction_tokens\":0,\"audio_tokens\":0,\"reasoning_tokens\":0,\"rejected_prediction_tokens\":0},\"latency_checkpoint\":{\"engine_tbt_ms\":9,\"engine_ttft_ms\":29,\"engine_ttlt_ms\":413,\"pre_inference_ms\":148,\"service_tbt_ms\":7,\"service_ttft_ms\":440,\"service_ttlt_ms\":726,\"user_visible_ttft_ms\":292},\"prompt_tokens\":1398,\"prompt_tokens_details\":{\"audio_tokens\":0,\"cached_tokens\":1280},\"total_tokens\":1432}}\n"
+        d\xEDas disponen de ip por parte del perito? Gracias\\\"}\",\"refusal\":null,\"role\":\"assistant\"}}],\"created\":1789474679,\"id\":\"chatcmpl-EOMOlWoZ7Czd3qS3P7uJFRQgP6cGA\",\"model\":\"gpt-5-mini-2025-08-07\",\"object\":\"chat.completion\",\"prompt_filter_results\":[{\"prompt_index\":0,\"content_filter_results\":{\"hate\":{\"filtered\":false,\"severity\":\"safe\"},\"jailbreak\":{\"detected\":false,\"filtered\":false},\"self_harm\":{\"filtered\":false,\"severity\":\"safe\"},\"sexual\":{\"filtered\":false,\"severity\":\"safe\"},\"violence\":{\"filtered\":false,\"severity\":\"safe\"}}}],\"routing\":{\"serving_pipereplica\":\"d20260817160822-45b824db-default-r2-dp0-default\"},\"service_tier\":\"default\",\"system_fingerprint\":null,\"usage\":{\"completion_tokens\":34,\"completion_tokens_details\":{\"accepted_prediction_tokens\":0,\"audio_tokens\":0,\"reasoning_tokens\":0,\"rejected_prediction_tokens\":0},\"latency_checkpoint\":{\"engine_tbt_ms\":8,\"engine_ttft_ms\":45,\"engine_ttlt_ms\":397,\"pre_inference_ms\":132,\"service_tbt_ms\":9,\"service_ttft_ms\":766,\"service_ttlt_ms\":1149,\"user_visible_ttft_ms\":634},\"prompt_tokens\":1449,\"prompt_tokens_details\":{\"audio_tokens\":0,\"cached_tokens\":0},\"total_tokens\":1483}}\n"
     headers:
       content-length:
-      - '1591'
+      - '1589'
       content-type:
       - application/json
       date:
-      - Tue, 15 Sep 2026 08:49:17 GMT
+      - Tue, 15 Sep 2026 12:17:58 GMT
       server:
       - istio-envoy
       skip-error-remapping:
@@ -121,7 +124,7 @@ interactions:
       x-content-type-options:
       - nosniff
       x-request-id:
-      - 843e3bdc-7aaf-4c78-b623-2f3c5b10d03a
+      - 21628fdd-2df1-4637-8e2d-3eab7c23e0bf
     status:
       code: 200
       message: OK

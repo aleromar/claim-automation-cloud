@@ -19,8 +19,11 @@ interactions:
       in Datos de la Entidad.\\n- nif: the value after \\\"Nif:\\\" in Datos del Asegurado.\\n-
       owner_name: the value after \\\"Tomador:\\\" in Datos del Asegurado, verbatim
       (keep the\\n  surname-comma-name order if that is how it is written).\\n- address:
-      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. Only when that
-      line is blank,\\n  use the Asegurado's \\\"Direcci\xF3n:\\\" inside Implicados.\\n-
+      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. When that line
+      has no value\\n  (nothing after \\\"Direcci\xF3n:\\\"), you MUST return instead
+      the \\\"Direcci\xF3n:\\\" that follows\\n  \\\"Asegurado:\\\" inside Implicados
+      (for an asistencia, the single implicado's address line).\\n  Return null only
+      if both are empty. Never use the Perjudicado's or Interviene's address.\\n-
       town: the value after \\\"Localidad:\\\" in Datos del Siniestro, stopping before
       \\\"C\xF3digo Postal:\\\"\\n  or \\\"Provincia:\\\".\\n- phone_number: the Asegurado's
       \\\"Tfno\\\" inside Implicados (for an asistencia there is a single\\n  implicado
@@ -102,7 +105,7 @@ interactions:
       connection:
       - keep-alive
       content-length:
-      - '8040'
+      - '8259'
       content-type:
       - application/json
       user-agent:
@@ -132,16 +135,16 @@ interactions:
       string: '{"choices":[{"content_filter_results":{"hate":{"filtered":false,"severity":"safe"},"protected_material_code":{"detected":false,"filtered":false},"protected_material_text":{"detected":false,"filtered":false},"self_harm":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"violence":{"filtered":false,"severity":"safe"}},"finish_reason":"stop","index":0,"logprobs":null,"message":{"annotations":[],"content":"{\"insurance_company\":\"Reale\",\"nif\":\"00000011B\",\"address\":\"CAMINO
         FICTICIO - DESA\",\"phone_number\":\"600000011\",\"town\":\"VEGA DE EJEMPLO\",\"description\":\"Necesita
         asistencia con el profesional correspondiente para colocar/ arreglar la persiana\",\"owner_name\":\"GARCIA
-        EJEMPLO , EMILIO\"}","refusal":null,"role":"assistant"}}],"created":1789462156,"id":"chatcmpl-EOJ8mYzDJ4OeYnCnYGr55h1shIL8O","model":"gpt-5-mini-2025-08-07","object":"chat.completion","prompt_filter_results":[{"prompt_index":0,"content_filter_results":{"hate":{"filtered":false,"severity":"safe"},"jailbreak":{"detected":false,"filtered":false},"self_harm":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"violence":{"filtered":false,"severity":"safe"}}}],"routing":{"serving_pipereplica":"d20260817160822-45b824db-default-r2-dp0-default"},"service_tier":"default","system_fingerprint":null,"usage":{"completion_tokens":89,"completion_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0},"latency_checkpoint":{"engine_tbt_ms":8,"engine_ttft_ms":27,"engine_ttlt_ms":778,"pre_inference_ms":176,"service_tbt_ms":7,"service_ttft_ms":805,"service_ttlt_ms":1523,"user_visible_ttft_ms":629},"prompt_tokens":1957,"prompt_tokens_details":{"audio_tokens":0,"cached_tokens":1920},"total_tokens":2046}}
+        EJEMPLO , EMILIO\"}","refusal":null,"role":"assistant"}}],"created":1789474676,"id":"chatcmpl-EOMOicCMoWXNHMx17bVdhvie4jrc9","model":"gpt-5-mini-2025-08-07","object":"chat.completion","prompt_filter_results":[{"prompt_index":0,"content_filter_results":{"hate":{"filtered":false,"severity":"safe"},"jailbreak":{"detected":false,"filtered":false},"self_harm":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"violence":{"filtered":false,"severity":"safe"}}}],"routing":{"serving_pipereplica":"d20260817160822-45b824db-default-r2-dp0-default"},"service_tier":"default","system_fingerprint":null,"usage":{"completion_tokens":89,"completion_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0},"latency_checkpoint":{"engine_tbt_ms":8,"engine_ttft_ms":64,"engine_ttlt_ms":860,"pre_inference_ms":148,"service_tbt_ms":8,"service_ttft_ms":335,"service_ttlt_ms":1123,"user_visible_ttft_ms":187},"prompt_tokens":2008,"prompt_tokens_details":{"audio_tokens":0,"cached_tokens":0},"total_tokens":2097}}
 
         '
     headers:
       content-length:
-      - '1818'
+      - '1815'
       content-type:
       - application/json
       date:
-      - Tue, 15 Sep 2026 08:49:15 GMT
+      - Tue, 15 Sep 2026 12:17:56 GMT
       server:
       - istio-envoy
       skip-error-remapping:
@@ -153,7 +156,7 @@ interactions:
       x-content-type-options:
       - nosniff
       x-request-id:
-      - 8812e867-db92-4405-8d04-f86c192fe4ba
+      - 4867b1d5-2335-4764-af26-aeddfa2f44e1
     status:
       code: 200
       message: OK

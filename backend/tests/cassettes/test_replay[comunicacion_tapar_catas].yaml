@@ -19,8 +19,11 @@ interactions:
       in Datos de la Entidad.\\n- nif: the value after \\\"Nif:\\\" in Datos del Asegurado.\\n-
       owner_name: the value after \\\"Tomador:\\\" in Datos del Asegurado, verbatim
       (keep the\\n  surname-comma-name order if that is how it is written).\\n- address:
-      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. Only when that
-      line is blank,\\n  use the Asegurado's \\\"Direcci\xF3n:\\\" inside Implicados.\\n-
+      the value after \\\"Direcci\xF3n:\\\" in Datos del Siniestro. When that line
+      has no value\\n  (nothing after \\\"Direcci\xF3n:\\\"), you MUST return instead
+      the \\\"Direcci\xF3n:\\\" that follows\\n  \\\"Asegurado:\\\" inside Implicados
+      (for an asistencia, the single implicado's address line).\\n  Return null only
+      if both are empty. Never use the Perjudicado's or Interviene's address.\\n-
       town: the value after \\\"Localidad:\\\" in Datos del Siniestro, stopping before
       \\\"C\xF3digo Postal:\\\"\\n  or \\\"Provincia:\\\".\\n- phone_number: the Asegurado's
       \\\"Tfno\\\" inside Implicados (for an asistencia there is a single\\n  implicado
@@ -73,7 +76,7 @@ interactions:
       connection:
       - keep-alive
       content-length:
-      - '5357'
+      - '5576'
       content-type:
       - application/json
       user-agent:
@@ -100,18 +103,19 @@ interactions:
     uri: https://foundry.example/openai/v1/chat/completions
   response:
     body:
-      string: '{"choices":[{"content_filter_results":{"hate":{"filtered":false,"severity":"safe"},"protected_material_code":{"detected":false,"filtered":false},"protected_material_text":{"detected":false,"filtered":false},"self_harm":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"violence":{"filtered":false,"severity":"safe"}},"finish_reason":"stop","index":0,"logprobs":null,"message":{"annotations":[],"content":"{\"observaciones\":\"No
+      string: '{"choices":[{"content_filter_result":{"error":{"code":"content_filter_error","message":"The
+        contents are not filtered"}},"content_filter_results":{},"finish_reason":"stop","index":0,"logprobs":null,"message":{"annotations":[],"content":"{\"observaciones\":\"No
         logramos contacto con reparador Solicitamos informen si han acudido a tapar
-        catas\"}","refusal":null,"role":"assistant"}}],"created":1789462160,"id":"chatcmpl-EOJ8qK7q858DQPerR8kddujYKop4r","model":"gpt-5-mini-2025-08-07","object":"chat.completion","prompt_filter_results":[{"prompt_index":0,"content_filter_results":{"hate":{"filtered":false,"severity":"safe"},"jailbreak":{"detected":false,"filtered":false},"self_harm":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"violence":{"filtered":false,"severity":"safe"}}}],"routing":{"serving_pipereplica":"d20260817160822-45b824db-default-r2-dp0-default"},"service_tier":"default","system_fingerprint":null,"usage":{"completion_tokens":41,"completion_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0},"latency_checkpoint":{"engine_tbt_ms":8,"engine_ttft_ms":27,"engine_ttlt_ms":435,"pre_inference_ms":101,"service_tbt_ms":8,"service_ttft_ms":248,"service_ttlt_ms":651,"user_visible_ttft_ms":146},"prompt_tokens":1322,"prompt_tokens_details":{"audio_tokens":0,"cached_tokens":1280},"total_tokens":1363}}
+        catas\"}","refusal":null,"role":"assistant"}}],"created":1789474681,"id":"chatcmpl-EOMOn1wOKsIerxzQewAybk0viOBTL","model":"gpt-5-mini-2025-08-07","object":"chat.completion","prompt_filter_results":[{"prompt_index":0,"content_filter_results":{"hate":{"filtered":false,"severity":"safe"},"jailbreak":{"detected":false,"filtered":false},"self_harm":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"violence":{"filtered":false,"severity":"safe"}}}],"routing":{"serving_pipereplica":"d20260817160822-45b824db-default-r2-dp0-default"},"service_tier":"default","system_fingerprint":null,"usage":{"completion_tokens":41,"completion_tokens_details":{"accepted_prediction_tokens":0,"audio_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0},"latency_checkpoint":{"engine_tbt_ms":8,"engine_ttft_ms":49,"engine_ttlt_ms":458,"pre_inference_ms":128,"service_tbt_ms":8,"service_ttft_ms":324,"service_ttlt_ms":710,"user_visible_ttft_ms":197},"prompt_tokens":1373,"prompt_tokens_details":{"audio_tokens":0,"cached_tokens":0},"total_tokens":1414}}
 
         '
     headers:
       content-length:
-      - '1618'
+      - '1413'
       content-type:
       - application/json
       date:
-      - Tue, 15 Sep 2026 08:49:20 GMT
+      - Tue, 15 Sep 2026 12:18:01 GMT
       server:
       - istio-envoy
       skip-error-remapping:
@@ -123,7 +127,7 @@ interactions:
       x-content-type-options:
       - nosniff
       x-request-id:
-      - 00050fd4-bc1d-439e-ba10-3dd10da3f8e6
+      - 90017307-b464-4936-9c81-d60105f59013
     status:
       code: 200
       message: OK
