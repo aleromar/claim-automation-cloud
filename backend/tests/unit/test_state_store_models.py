@@ -87,6 +87,61 @@ def test_claim_record_optional_fields_default_none():
     assert record.owner is None
 
 
+def test_claim_record_extractor_used_defaults_none():
+    # llm-extraction REQ-4.1: pre-5a2 rows carry no provenance property.
+    record = ClaimRecord(
+        at=datetime.now(UTC),
+        claim_ref="2026/417",
+        subject="s",
+        type="DECLARACION_SINIESTRO",
+        card_url="",
+    )
+    assert record.extractor_used is None
+
+
+def test_claim_record_extractor_used_round_trips_through_the_entity():
+    from core.state_store import CLAIM_EXTRACTOR_PROP, _to_claim_record
+
+    base = {
+        "at": datetime.now(UTC),
+        "claim_ref": "2026/417",
+        "subject": "s",
+        "type": "DECLARACION_SINIESTRO",
+        "card_url": "https://trello.com/c/1",
+    }
+    assert CLAIM_EXTRACTOR_PROP == "extractor_used"
+    assert _to_claim_record(dict(base)).extractor_used is None  # absent → None, no migration
+    assert _to_claim_record({**base, CLAIM_EXTRACTOR_PROP: "llm"}).extractor_used == "llm"
+
+
+def test_record_claim_writes_extractor_used_only_when_present():
+    # Same absent-when-None convention as town/owner (REQ-4.1).
+    from core.state_store import CLAIM_EXTRACTOR_PROP, StateStore
+
+    class Table:
+        def __init__(self):
+            self.entities = []
+
+        def upsert_entity(self, entity, mode=None):
+            self.entities.append(entity)
+
+    class Service:
+        def __init__(self, table):
+            self._t = table
+
+        def get_table_client(self, name):
+            return self._t
+
+    table = Table()
+    store = StateStore(Service(table))
+    common = dict(at=datetime.now(UTC), subject="s", type="DECLARACION_SINIESTRO", card_url="u")
+    store.record_claim(ClaimRecord(claim_ref="2026/1", **common))
+    store.record_claim(ClaimRecord(claim_ref="2026/2", extractor_used="regex_fallback", **common))
+    untagged, tagged = table.entities
+    assert CLAIM_EXTRACTOR_PROP not in untagged
+    assert tagged[CLAIM_EXTRACTOR_PROP] == "regex_fallback"
+
+
 def test_trello_config_holds_board_and_list_ids():
     # settings REQ-1/2: the TrelloConfig row carries the two runtime-entered IDs (D23).
     cfg = TrelloConfig(board_id="g7vysmjD", list_id="68875e0d401d7613fcbbc092")

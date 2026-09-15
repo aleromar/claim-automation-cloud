@@ -31,7 +31,7 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AsyncOpenAI
 from pydantic import BaseModel, BeforeValidator, ConfigDict, PrivateAttr, model_validator
 from pydantic_ai import Agent
-from pydantic_ai.capabilities import Hooks
+from pydantic_ai.capabilities import Hooks, Instrumentation
 from pydantic_ai.exceptions import (
     AgentRunError,
     ContentFilterError,
@@ -39,6 +39,7 @@ from pydantic_ai.exceptions import (
     UnexpectedModelBehavior,
 )
 from pydantic_ai.models import Model
+from pydantic_ai.models.instrumented import InstrumentationSettings
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.output import NativeOutput
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -294,6 +295,17 @@ class LlmFieldExtractor:
             ctx.deps.finish_reason = response.finish_reason
             return response
 
+        # REQ-5.1/5.2: gen_ai spans on the D28 global TracerProvider (no-op
+        # without one); prompt + answer captured when the switch is on —
+        # operator decision, overriding otel REQ-7.2 for this call only. The
+        # agent-run span also carries `pydantic_ai.all_messages`/`final_result`
+        # (second copy, accepted at checkpoint 1).
+        instrumentation = Instrumentation(
+            settings=InstrumentationSettings(
+                include_content=settings.llm_capture_content,
+                include_binary_content=settings.llm_capture_content,
+            )
+        )
         self._agents: dict[type[_TracksNulled], Agent[CallState, Any]] = {
             output_model: Agent(
                 model,
@@ -302,7 +314,7 @@ class LlmFieldExtractor:
                 instructions=PROMPT,
                 deps_type=CallState,
                 retries={"output": LLM_OUTPUT_RETRIES},  # explicit: library default is 1
-                capabilities=[hooks],
+                capabilities=[hooks, instrumentation],
             )
             for output_model in (SiniestroFields, ComunicacionFields)
         }

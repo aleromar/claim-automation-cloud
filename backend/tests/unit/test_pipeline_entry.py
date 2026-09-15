@@ -37,7 +37,7 @@ from pipeline.entry import (
     build_claim_query,
     process_mailbox,
 )
-from pipeline.extraction import ClaimFields
+from pipeline.extraction import ClaimFields, ExtractorUsed
 
 CLAIM_SUBJECT = "AVISO: Declaración de siniestro a colaborador 2026/417"
 URGENTE_SUBJECT = "Declaración de siniestro urgente a colaborador 2026/500"
@@ -294,6 +294,27 @@ def test_ledger_row_carries_the_card_url_and_type():
     assert record.type == "DECLARACION_SINIESTRO"
     assert record.town == "Madrid"
     assert record.owner == "Nombre Apellido"
+    assert record.extractor_used is None  # the fake tags nothing
+
+
+def test_ledger_row_carries_the_extractor_provenance():
+    # llm-extraction REQ-4.1: _process_one copies claim.extractor_used onto the row.
+    from time import monotonic
+
+    class TaggingExtractor:
+        def extract(self, claim_type, subject, body, raw_body) -> ClaimFields:
+            return ClaimFields(town="Madrid", owner_name="N A", extractor_used=ExtractorUsed.LLM)
+
+    history = FakeHistory()
+    process_mailbox(
+        FakeGmail([_msg("m1", CLAIM_SUBJECT, 100)]),
+        FakeTrello(),
+        FakeMembretes(),
+        history,
+        deadline=monotonic() + RUN_DEADLINE_S,
+        extractor=TaggingExtractor(),
+    )
+    assert history.rows["2026/417"].extractor_used == "llm"
 
 
 # --- REQ-7 wiring: the PDF reaches Trello in memory ---

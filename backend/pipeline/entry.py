@@ -258,6 +258,7 @@ def _process_one(
             town=claim.town,
             owner=claim.owner_name,
             card_url=card_url,
+            extractor_used=claim.extractor_used,
         )
     )
     return ACTION_CARD
