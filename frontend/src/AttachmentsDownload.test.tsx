@@ -17,7 +17,7 @@ import {
 // jsdom implements neither object URLs nor anchor navigation (gate ER-6): the
 // blob path is asserted through these stubs, and the click spy keeps the
 // "Not implemented: navigation" noise out of the run.
-const createObjectURL = vi.fn(() => "blob:mock-url");
+const createObjectURL = vi.fn((_blob: Blob) => "blob:mock-url");
 const revokeObjectURL = vi.fn();
 let clickedDownloads: string[] = [];
 
@@ -101,7 +101,7 @@ describe("AttachmentsDownload happy path (REQ-3.3)", () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     // Node's Response.blob() and jsdom's global Blob are different classes, so
     // assert the blob's contents rather than its constructor.
-    expect((createObjectURL.mock.calls[0][0] as Blob).size).toBe(2);
+    expect(createObjectURL.mock.calls[0][0].size).toBe(2);
     expect(clickedDownloads).toEqual(["2026_417.zip"]);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
   });
