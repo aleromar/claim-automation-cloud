@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.attachments_routes import router as attachments_router
 from app.auth_routes import router as auth_router
 from core.config import get_settings
 from core.secret_store import (
@@ -50,6 +51,7 @@ app.include_router(auth_router)
 app.include_router(worker_router)
 app.include_router(settings_router)
 app.include_router(metrics_router)
+app.include_router(attachments_router)
 
 
 @app.exception_handler(RequestValidationError)

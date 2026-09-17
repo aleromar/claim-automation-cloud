@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 
 import { apiUrl } from "./api";
+import AttachmentsDownload from "./AttachmentsDownload";
 import { authErrorMessage, authFetch, clearToken, getToken } from "./auth";
 import Login from "./Login";
 import MetricsPanel from "./MetricsPanel";
@@ -21,6 +22,7 @@ import {
   GOOGLE_FLOW_FAILED,
   LOG_OUT,
   NAV_DASHBOARD,
+  NAV_DOWNLOADS,
   NAV_SETTINGS,
   SESSION_CONTRACT_ERROR,
 } from "./strings";
@@ -162,6 +164,9 @@ export default function App({
               <NavLink to="/">{NAV_DASHBOARD}</NavLink>
             </li>
             <li>
+              <NavLink to="/descargas">{NAV_DOWNLOADS}</NavLink>
+            </li>
+            <li>
               <NavLink to="/settings">{NAV_SETTINGS}</NavLink>
             </li>
           </ul>
@@ -202,6 +207,7 @@ export default function App({
               </>
             }
           />
+          <Route path="/descargas" element={<AttachmentsDownload />} />
           <Route path="/settings" element={<Settings />} />
           {/* navigationFallback serves the SPA for ANY path (settings REQ-4.5):
               a typo'd deep link must land somewhere, not on an empty main. */}

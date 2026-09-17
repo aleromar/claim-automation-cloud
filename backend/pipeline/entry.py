@@ -33,6 +33,7 @@ from pipeline.claim_data import (
     build_card_comment,
     build_card_description,
     build_card_name,
+    build_pdf_filename,
 )
 from pipeline.extraction import get_field_extractor
 from pipeline.gmail_client import GmailClient
@@ -244,7 +245,7 @@ def _process_one(
             name=build_card_name(claim),
             description=build_card_description(claim),
             pdf_bytes=pdf,
-            pdf_filename=f"claim_{claim.claim_number}_{claim.year}.pdf",
+            pdf_filename=build_pdf_filename(claim.year, claim.claim_number),
             comment=build_card_comment(claim),
         )
     # Ledger BEFORE relabel (REQ-6 deviation): a crash between them leaves the

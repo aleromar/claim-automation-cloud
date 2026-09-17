@@ -15,9 +15,12 @@ from core.config import Settings
 from core.secret_store import TRELLO_API_KEY, TRELLO_TOKEN, FileSecretStore
 from core.state_store import TrelloConfig
 from pipeline.trello_client import (
+    ATTACHMENT_TIMEOUT_S,
     MISSING_CONFIG,
     MISSING_CREDENTIALS,
+    REQUEST_TIMEOUT_S,
     TOKEN_REJECTED,
+    Attachment,
     TrelloClient,
     TrelloNoAccessError,
 )
@@ -256,6 +259,105 @@ def test_find_card_none_when_absent_everywhere(trello):
     _me_ok()
     trello.preflight()
     assert trello.find_card_by_claim_ref("2026/999") is None
+
+
+# --- attachments (attachment-download REQ-1) ---
+
+
+@respx.mock
+def test_list_attachments_maps_fields(trello):
+    route = respx.get(f"{API_BASE}/1/cards/card-7/attachments").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "id": "att-1",
+                    "name": "IMG_0001.jpg",
+                    "bytes": 1234,
+                    "mimeType": "image/jpeg",
+                    "isUpload": True,
+                },
+                {"id": "att-2", "name": "https://example.test/doc", "isUpload": False},
+            ],
+        )
+    )
+    _me_ok()
+    trello.preflight()
+    attachments = trello.list_attachments("card-7")
+    # Only what the route consumes is modelled (gate 3 I1): extra Trello
+    # fields in the payload are ignored, not mapped.
+    assert attachments == [
+        Attachment(id="att-1", name="IMG_0001.jpg", is_upload=True),
+        Attachment(id="att-2", name="https://example.test/doc", is_upload=False),
+    ]
+    assert route.calls.last.request.url.params["fields"] == "id,name,isUpload"
+
+
+@respx.mock
+def test_download_attachment_sends_header_auth_and_quotes_name(trello):
+    # The name is a path segment Trello echoes back; `/` and spaces in a
+    # filename must not become path structure.
+    route = respx.get(
+        f"{API_BASE}/1/cards/card-7/attachments/att-1/download/foto%20sal%C3%B3n%2F1.jpg"
+    ).mock(return_value=Response(200, content=b"\xff\xd8jpeg"))
+    _me_ok()
+    trello.preflight()
+    assert trello.download_attachment("card-7", "att-1", "foto salón/1.jpg") == b"\xff\xd8jpeg"
+    request = route.calls.last.request
+    assert 'oauth_token="token-456"' in request.headers["Authorization"]
+    assert "token-456" not in str(request.url)
+
+
+@respx.mock
+def test_download_attachment_uses_long_timeout(trello):
+    route = respx.get(f"{API_BASE}/1/cards/card-7/attachments/att-1/download/a.jpg").mock(
+        return_value=Response(200, content=b"x")
+    )
+    _me_ok()
+    trello.preflight()
+    trello.download_attachment("card-7", "att-1", "a.jpg")
+    assert route.calls.last.request.extensions["timeout"]["read"] == ATTACHMENT_TIMEOUT_S
+    assert ATTACHMENT_TIMEOUT_S > REQUEST_TIMEOUT_S
+
+
+@respx.mock
+def test_download_attachment_follows_redirect_without_auth(trello):
+    # Trello may 302 to its CDN. Following is required (raise_for_status is
+    # silent on 3xx, so an unfollowed redirect would zip an empty body); the
+    # OAuth header must NOT travel to the other origin.
+    respx.get(f"{API_BASE}/1/cards/card-7/attachments/att-1/download/a.jpg").mock(
+        return_value=Response(302, headers={"Location": "https://cdn.test/blob/a.jpg"})
+    )
+    cdn = respx.get("https://cdn.test/blob/a.jpg").mock(return_value=Response(200, content=b"img"))
+    _me_ok()
+    trello.preflight()
+    assert trello.download_attachment("card-7", "att-1", "a.jpg") == b"img"
+    assert "Authorization" not in cdn.calls.last.request.headers
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "path", ["/1/cards/card-7/attachments", "/1/cards/card-7/attachments/att-1/download/a.jpg"]
+)
+def test_attachment_error_bodies_are_logged(trello, caplog, path):
+    import logging
+
+    respx.get(f"{API_BASE}{path}").mock(return_value=Response(404, text="attachment not found"))
+    _me_ok()
+    trello.preflight()
+    with caplog.at_level(logging.WARNING), pytest.raises(httpx.HTTPStatusError):
+        if path.endswith("/attachments"):
+            trello.list_attachments("card-7")
+        else:
+            trello.download_attachment("card-7", "att-1", "a.jpg")
+    assert any("attachment not found" in r.getMessage() for r in caplog.records)
+
+
+def test_attachment_calls_before_preflight_are_programming_errors(trello):
+    with pytest.raises(RuntimeError, match="preflight"):
+        trello.list_attachments("card-7")
+    with pytest.raises(RuntimeError, match="preflight"):
+        trello.download_attachment("card-7", "att-1", "a.jpg")
 
 
 # --- bounded 429 retry (REQ-3) ---

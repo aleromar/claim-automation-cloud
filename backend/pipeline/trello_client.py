@@ -9,8 +9,10 @@ no I/O and the httpx client is built lazily (same E3/M7 stance as GmailClient).
 
 import logging
 import re
+from dataclasses import dataclass
 from time import sleep
 from typing import Final, Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -23,6 +25,10 @@ from pipeline.http_logging import raise_for_status_logged
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT_S: Final = 10.0
+# Attachment bytes, not JSON: a 10 MB photo on a slow link needs more than the
+# API default (attachment-download REQ-1.2).
+ATTACHMENT_TIMEOUT_S: Final = 30.0
+ATTACHMENT_FIELDS: Final = "id,name,isUpload"
 # Bounded 429 retry (REQ-3): Trello's token limit is 100 req/10 s — a rate
 # blip must not burn a terminal `failed` label on an otherwise-fine email.
 MAX_429_RETRIES: Final = 2
@@ -41,6 +47,13 @@ class TrelloNoAccessError(NoAccessError):
 
     def __init__(self, reason: NoAccessReason) -> None:
         super().__init__(reason, f"trello access unavailable: {reason}")
+
+
+@dataclass(frozen=True)
+class Attachment:
+    id: str
+    name: str
+    is_upload: bool  # link attachments have no downloadable bytes
 
 
 class TrelloClient:
@@ -152,6 +165,33 @@ class TrelloClient:
                 return card
         return None
 
+    def list_attachments(self, card_id: str) -> list[Attachment]:
+        payload = self._checked(
+            self._request(
+                "GET", f"/1/cards/{card_id}/attachments", params={"fields": ATTACHMENT_FIELDS}
+            )
+        ).json()
+        return [
+            Attachment(
+                id=attachment["id"],
+                name=attachment["name"],
+                is_upload=bool(attachment.get("isUpload")),
+            )
+            for attachment in payload
+        ]
+
+    def download_attachment(self, card_id: str, attachment_id: str, name: str) -> bytes:
+        """Bytes need the OAuth header (query-param auth is refused here), so
+        the browser can never fetch them itself. The name is a path segment:
+        `/` and spaces inside a filename must not become path structure.
+        Redirects are followed for this call only — Trello may 302 to its CDN,
+        and raise_for_status is silent on 3xx; httpx drops Authorization when
+        the origin changes (pinned by test)."""
+        path = f"/1/cards/{card_id}/attachments/{attachment_id}/download/{quote(name, safe='')}"
+        return self._checked(
+            self._request("GET", path, timeout=ATTACHMENT_TIMEOUT_S, follow_redirects=True)
+        ).content
+
     def _request(
         self,
         method: str,
@@ -160,6 +200,8 @@ class TrelloClient:
         params: dict | None = None,
         data: dict | None = None,
         files: dict | None = None,
+        timeout: float | None = None,
+        follow_redirects: bool = False,
     ) -> httpx.Response:
         if self._auth is None:
             raise RuntimeError("preflight() must succeed before Trello API calls")
@@ -171,6 +213,8 @@ class TrelloClient:
                 data=data,
                 files=files,
                 headers=self._auth,
+                timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+                follow_redirects=follow_redirects,
             )
             if response.status_code != 429:
                 return response
