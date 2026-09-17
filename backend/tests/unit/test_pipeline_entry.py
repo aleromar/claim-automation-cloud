@@ -25,6 +25,7 @@ from pipeline.claim_data import (
     build_card_comment,
     build_card_description,
     build_card_name,
+    build_pdf_filename,
 )
 from pipeline.entry import (
     ACTION_CARD,
@@ -402,6 +403,12 @@ def test_card_name_matches_laptop_format():
     assert build_card_name(_claim(ClaimType.DECLARACION_SINIESTRO)) == (
         "MADRID 2026/417 Nombre Apellido"
     )
+
+
+def test_build_pdf_filename_matches_the_attached_name():
+    # attachment-download REQ-4: the download route excludes the pipeline's own
+    # PDF by this exact name — one builder, two callers, no drift.
+    assert build_pdf_filename(year="2026", claim_number="417") == "claim_417_2026.pdf"
 
 
 def test_card_description_matches_laptop_format():

@@ -21,6 +21,7 @@ export const CHECKING_SESSION = "Comprobando sesión…";
 export const SESSION_CONTRACT_ERROR =
   "La comprobación de sesión devolvió una respuesta inesperada (sin correo de cuenta).";
 export const NAV_DASHBOARD = "Panel";
+export const NAV_DOWNLOADS = "Descargas";
 export const NAV_SETTINGS = "Ajustes";
 export const LOG_OUT = "Cerrar sesión";
 export const CHECKING_BACKEND = "Comprobando el servidor…";
@@ -102,6 +103,36 @@ export const TABLE_TYPE = "Tipo";
 export const TABLE_TOWN = "Población";
 export const TABLE_OWNER = "Titular";
 export const NO_CLAIMS_IN_WINDOW = "No hay siniestros en este periodo.";
+
+// --- Descargas (attachment-download) ---
+export const DOWNLOADS_TITLE = "Descargar adjuntos";
+export const CLAIM_REF_LABEL = "Expediente (ej: 2026/654321)";
+export const DOWNLOAD = "Descargar";
+export const INVALID_CLAIM_REF =
+  "Formato inválido. Usa el formato AAAA/NNNNNN (ej: 2026/654321).";
+export const DOWNLOAD_FAILED = "La descarga ha fallado. Inténtalo de nuevo.";
+export const downloadReadyText = (filename: string): string =>
+  `Descarga lista: ${filename}`;
+
+// The closed detail set (mirrors the backend attachments_routes DETAIL_*
+// constants, the way RunOutcome mirrors HeartbeatStatus); an unknown detail
+// renders DOWNLOAD_FAILED — server text is never shown.
+export type AttachmentsDetail =
+  | "card_not_found"
+  | "no_attachments"
+  | "trello_no_access"
+  | "trello_error"
+  | "timeout";
+export const ATTACHMENTS_ERROR_LABELS: Record<AttachmentsDetail, string> = {
+  card_not_found: "No se encontró ninguna tarjeta para ese expediente.",
+  no_attachments: "La tarjeta no tiene archivos adjuntos.",
+  // Deliberately unfinished: the page appends a <Link> reading NAV_SETTINGS
+  // plus the full stop, so the sentence ends "…revisa Ajustes."
+  trello_no_access: "Trello no está configurado o el token ha caducado: revisa",
+  trello_error: DOWNLOAD_FAILED,
+  timeout: "La descarga ha tardado demasiado. Inténtalo de nuevo.",
+};
+export const TRELLO_NO_ACCESS_DETAIL: AttachmentsDetail = "trello_no_access";
 
 // --- Settings ---
 export const SETTINGS_TITLE = "Ajustes";

@@ -8,10 +8,12 @@ import {
   BACKEND_UNAVAILABLE,
   CHECKING_BACKEND,
   CHECKING_SESSION,
+  DOWNLOADS_TITLE,
   GOOGLE_FLOW_FAILED,
   LOG_OUT,
   METRICS_TITLE,
   NAV_DASHBOARD,
+  NAV_DOWNLOADS,
   NAV_SETTINGS,
   SESSION_CONTRACT_ERROR,
   SIGN_IN_WITH_GOOGLE,
@@ -189,6 +191,19 @@ describe("App navigation (settings REQ-4.1) and authed error banner (REQ-4.8)", 
     expect(
       await screen.findByRole("switch", { name: WORKER_ENABLED_LABEL }),
     ).toBeInTheDocument();
+  });
+
+  it("navigates to Descargas and renders the download page (attachment-download REQ-3.1)", async () => {
+    storeToken();
+    mockApi();
+    render(<App />);
+    await screen.findByRole("switch", { name: WORKER_ENABLED_LABEL });
+
+    fireEvent.click(screen.getByRole("link", { name: NAV_DOWNLOADS }));
+    expect(
+      await screen.findByRole("heading", { name: DOWNLOADS_TITLE }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("surfaces a fragment error to a still-authed operator (REQ-4.8)", async () => {

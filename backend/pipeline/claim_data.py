@@ -198,6 +198,12 @@ def build_card_name(claim: ClaimData) -> str:
     return f"{claim.town.upper()} {claim.year}/{claim.claim_number} {claim.owner_name}"
 
 
+def build_pdf_filename(year: str, claim_number: str) -> str:
+    """The letterhead PDF's attachment name — shared with the attachment
+    download route, which excludes exactly this file (photos only)."""
+    return f"claim_{claim_number}_{year}.pdf"
+
+
 def build_card_description(claim: ClaimData) -> str:
     return (
         f"Empresa de seguros: {claim.insurance_company}\n"
