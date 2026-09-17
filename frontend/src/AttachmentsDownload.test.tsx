@@ -17,7 +17,7 @@ import {
 // jsdom implements neither object URLs nor anchor navigation (gate ER-6): the
 // blob path is asserted through these stubs, and the click spy keeps the
 // "Not implemented: navigation" noise out of the run.
-const createObjectURL = vi.fn((_blob: Blob) => "blob:mock-url");
+const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:mock-url");
 const revokeObjectURL = vi.fn();
 let clickedDownloads: string[] = [];
 
