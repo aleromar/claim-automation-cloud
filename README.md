@@ -31,7 +31,7 @@ links to the Trello card the pipeline created for that email:
 ## How it works
 
 - **Worker on/off is a flag, not infrastructure.** A timer fires every
-  30 minutes regardless; the worker's first act is to read an `enabled` flag
+  20 minutes on weekday daytime (06–18 UTC) regardless; the worker's first act is to read an `enabled` flag
   from the state store. Off → heartbeat and exit in milliseconds. On → run
   the full pipeline. The dashboard toggle just flips the flag.
 - **One Google sign-in does double duty.** The operator's login consent also
