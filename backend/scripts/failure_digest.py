@@ -8,6 +8,7 @@ cause renders as one counted group, not one row per occurrence.
 """
 
 import argparse
+import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -85,6 +86,17 @@ def _heartbeat_count(query: dict[str, Any]) -> int:
     return int(rows[0]["Count"]) if rows else 0
 
 
+# datetime.weekday(): Monday == 0 … Sunday == 6.
+_NO_SCHEDULED_WAKE_IN_WINDOW: Final = frozenset({0, 6})
+
+
+def _heartbeat_expected(date: str) -> bool:
+    """The worker timer wakes 06–18 UTC Mon–Fri only (D5). The 05:00 UTC digest
+    looks back 25 h, so a Sunday or Monday digest window holds no scheduled wake
+    and zero heartbeats there is a quiet weekend, not dead telemetry."""
+    return dt.date.fromisoformat(date).weekday() not in _NO_SCHEDULED_WAKE_IN_WINDOW
+
+
 def _severity_label(row: dict[str, Any]) -> str:
     if row.get("itemType") == "exception":
         return "EXCEPTION"
@@ -147,11 +159,11 @@ def _render_group(group: dict[str, Any], details_cap: int | None) -> str:
     return "\n".join(lines)
 
 
-def _render_body(groups: list[dict[str, Any]], heartbeat: int) -> str:
+def _render_body(groups: list[dict[str, Any]], heartbeat_missing: bool) -> str:
     parts = []
-    if heartbeat == 0:
+    if heartbeat_missing:
         parts.append(
-            "**⚠ No worker heartbeat in the window** — the 30-min timer logged "
+            "**⚠ No worker heartbeat in the window** — the weekday-daytime timer logged "
             "nothing; investigate scheduler health alongside the failures below."
         )
     shown = groups[:TOP_GROUPS]
@@ -180,15 +192,15 @@ def build_result(
     failures: dict[str, Any], heartbeat_query: dict[str, Any], date: str
 ) -> dict[str, Any]:
     rows = _rows_as_dicts(failures)
-    heartbeat = _heartbeat_count(heartbeat_query)
+    heartbeat_missing = _heartbeat_count(heartbeat_query) == 0 and _heartbeat_expected(date)
     if not rows:
-        if heartbeat == 0:
+        if heartbeat_missing:
             return {
                 "action": ACTION_TELEMETRY_SILENT,
                 "title": f"[auto] Telemetry silent {date}",
                 "body": (
                     "No failure rows AND no worker heartbeat traces in the last 25 h. "
-                    "A quiet night is only a clean night if the 30-min worker's wake "
+                    "A quiet night is only a clean night if the worker's wake "
                     "logs are visible — telemetry may be dead (broken connection "
                     "string, recreated App Insights resource, stopped app)."
                 ),
@@ -197,7 +209,7 @@ def build_result(
     return {
         "action": ACTION_DIGEST,
         "title": f"[auto] Backend failures {date} ({len(rows)} events)",
-        "body": _render_body(_group(rows), heartbeat),
+        "body": _render_body(_group(rows), heartbeat_missing),
     }
 
 

@@ -21,8 +21,11 @@ def test_timer_function_registered():
     assert trigger.type == "timerTrigger"
 
 
-def test_timer_schedule_is_every_30_minutes():
-    assert WORKER_TIMER_SCHEDULE == "0 */30 * * * *"  # NCRONTAB: second 0, every 30th minute
+def test_timer_schedule_is_every_20_minutes_on_weekday_daytime_utc():
+    # NCRONTAB: second 0, every 20th minute, hours 06–18 UTC, Mon–Fri (D5 amended).
+    # UTC-only: Linux Consumption ignores WEBSITE_TIME_ZONE, so the window is
+    # widened to cover 08–19 local across both CET (UTC+1) and CEST (UTC+2).
+    assert WORKER_TIMER_SCHEDULE == "0 */20 6-18 * * 1-5"
     raw = json.loads(FUNCTIONS[WORKER_FUNCTION_NAME].get_raw_bindings()[0])
     assert raw["schedule"] == WORKER_TIMER_SCHEDULE
 
