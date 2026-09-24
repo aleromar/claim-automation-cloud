@@ -18,10 +18,16 @@ export class TrelloLive {
     return `OAuth oauth_consumer_key="${env.TRELLO_API_KEY}", oauth_token="${env.TRELLO_TOKEN}"`;
   }
 
-  private async call(method: string, path: string, what: string): Promise<unknown> {
+  private async call(
+    method: string,
+    path: string,
+    what: string,
+    body?: FormData,
+  ): Promise<unknown> {
     const res = await fetch(`${API}${path}`, {
       method,
       headers: { Authorization: this.authHeader() },
+      body,
     });
     if (!res.ok) {
       // `what`, never the path: URL segments embed the board id, which is
@@ -59,6 +65,18 @@ export class TrelloLive {
       "read card attachments",
     )) as { name: string }[];
     return attachments.map((a) => a.name);
+  }
+
+  /** Upload bytes as a card attachment (what the operator does by hand with a
+   * photo) — the input side of the attachment-download round-trip. */
+  async attachFile(
+    cardId: string,
+    name: string,
+    bytes: Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: "image/jpeg" }), name);
+    await this.call("POST", `/cards/${cardId}/attachments`, "attach file", form);
   }
 
   async archiveCard(cardId: string): Promise<void> {

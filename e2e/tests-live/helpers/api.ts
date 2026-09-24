@@ -35,3 +35,19 @@ export async function seedTrelloSettings(jwt: string): Promise<void> {
 export async function setWorkerEnabled(jwt: string, enabled: boolean): Promise<void> {
   await authedPost(jwt, "/worker/enabled", { enabled });
 }
+
+/** The attachment zip straight from the API (attachment-download REQ-5) —
+ * the browser path is exercised separately through the /descargas page. */
+export async function downloadClaimAttachments(
+  jwt: string,
+  claimRef: string,
+): Promise<Uint8Array> {
+  const [year, number] = claimRef.split("/");
+  const res = await fetch(`${BACKEND}/claims/${year}/${number}/attachments`, {
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (!res.ok) {
+    throw new Error(`backend: GET claim attachments failed (HTTP ${res.status})`);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
