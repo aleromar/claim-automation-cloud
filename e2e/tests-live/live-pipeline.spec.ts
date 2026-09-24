@@ -1,9 +1,15 @@
+import { createHash, randomBytes } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
+import { unzipSync } from "fflate";
 
-import { seedTrelloSettings, setWorkerEnabled } from "./helpers/api";
+import {
+  downloadClaimAttachments,
+  seedTrelloSettings,
+  setWorkerEnabled,
+} from "./helpers/api";
 import { requireLiveEnv } from "./helpers/env";
 import { GmailLive } from "./helpers/gmail";
 import { injectSession, mintSessionJwt } from "./helpers/session";
@@ -46,6 +52,25 @@ const withMarker = (marker: string): string =>
 const PROCESS_NOW_BASELINE_MS = 15_000;
 const PROCESS_NOW_MARGIN_MS = 45_000;
 const PROCESS_NOW_BUDGET_MS = PROCESS_NOW_BASELINE_MS + PROCESS_NOW_MARGIN_MS;
+
+// Attachment-download round-trip (attachment-download REQ-5). The name carries
+// a space and an accent on purpose: it is the one claim the unit suite could
+// not verify — that Trello accepts the percent-encoded name segment on its
+// download endpoint (spec Confidence notes).
+const PHOTO_NAME = "foto salón 1.jpg";
+const PHOTO_BYTES = 4096;
+
+const sha256 = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
+
+// The zip must hold exactly the uploaded photo: the pipeline's own PDF on the
+// same card is excluded by name (grill Q1/Q1b), and the hash proves the bytes
+// went through Trello, the backend proxy and the zip untouched.
+const expectZipIsThePhoto = (zip: Uint8Array, photo: Uint8Array, via: string) => {
+  const entries = unzipSync(zip);
+  expect(Object.keys(entries), `${via}: zip entries`).toEqual([PHOTO_NAME]);
+  expect(sha256(entries[PHOTO_NAME]), `${via}: photo hash`).toBe(sha256(photo));
+};
 
 const gmail = new GmailLive();
 const trello = new TrelloLive();
@@ -257,6 +282,29 @@ test("all six claim types flow through the real pipeline in one run", async ({
     declaracionComments.some((c) => c === `@board ${observaciones}`),
     "comunicación comment missing on the declaración card",
   ).toBe(true);
+
+  // Attachment download (attachment-download REQ-5): a photo uploaded to the
+  // declaración card comes back byte-identical, first straight from the API,
+  // then through the /descargas page in the real browser (blob-anchor save).
+  const photo = new Uint8Array(randomBytes(PHOTO_BYTES));
+  await trello.attachFile(declaracionCard.id, PHOTO_NAME, photo);
+
+  expectZipIsThePhoto(
+    await downloadClaimAttachments(jwt, declaracionRef),
+    photo,
+    "api",
+  );
+
+  await page.getByRole("link", { name: /^descargas$/i }).click();
+  await page.getByLabel(/expediente/i).fill(declaracionRef);
+  const downloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^descargar$/i }).click();
+  const download = await downloadEvent;
+  const declaracionNum = declaracionRef.split("/")[1];
+  expect(download.suggestedFilename()).toBe(`${year}_${declaracionNum}.zip`);
+  await expect(page.getByText(/descarga lista:/i)).toBeVisible();
+  const downloadPath = await download.path();
+  expectZipIsThePhoto(new Uint8Array(readFileSync(downloadPath)), photo, "browser");
 
   // Gmail (REQ-1.3), every seeded message: UNREAD gone, procesado present
   // (created lowercase on a fresh mailbox; lookup is case-insensitive).
