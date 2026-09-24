@@ -183,6 +183,19 @@ def test_flush_bounded_and_never_raises(monkeypatch, provider):
     assert time.perf_counter() - start < 2.0
 
 
+def test_abandoned_flush_logs_at_info(monkeypatch, caplog):
+    """An abandoned flush is routine and loses nothing (the line itself gets
+    exported by the next batch cycle); INFO keeps it out of the nightly
+    failure digest, which files everything at WARNING and above."""
+    monkeypatch.setattr(obs_setup, "_tracer_provider", _HangingProvider())
+    monkeypatch.setattr(obs_setup, "_logger_provider", None)
+    monkeypatch.setattr(obs_setup, "_flush_lock", threading.Lock())
+    with caplog.at_level(logging.INFO, logger=obs_setup.__name__):
+        flush_telemetry(timeout_millis=100)
+    abandoned = [r for r in caplog.records if "abandoned" in r.getMessage()]
+    assert [r.levelno for r in abandoned] == [logging.INFO]
+
+
 def test_flush_concurrent_calls_serialized(monkeypatch):
     """P12 guard: force_flush thread-safety is unproven — concurrent
     flush_telemetry calls (timer + any future path) must serialize."""

@@ -87,27 +87,27 @@ def test_failures_with_no_heartbeat_still_digest_but_flagged():
     assert "no worker heartbeat" in result["body"].lower()
 
 
-# The worker timer wakes 06–18 UTC Mon–Fri only (D5 amended 2026-09-16). The
-# 05:00 UTC digest's 25 h window therefore holds no scheduled wake on Sunday
-# (covers Saturday) or Monday (covers Sunday): zero heartbeats there is a quiet
-# weekend, not dead telemetry.
-SUNDAY, MONDAY, TUESDAY = "2026-09-20", "2026-09-21", "2026-09-22"
+# `date` is the UTC calendar day the queries cover (the day before the run). The
+# worker timer wakes 06–18 UTC Mon–Fri only (D5 amended 2026-09-16), so a
+# Saturday or Sunday digest holds no scheduled wake: zero heartbeats there is a
+# quiet weekend, not dead telemetry — a Monday with none IS dead telemetry.
+SATURDAY, SUNDAY, MONDAY = "2026-09-19", "2026-09-20", "2026-09-21"
 
 
-@pytest.mark.parametrize("weekend_date", [SUNDAY, MONDAY])
+@pytest.mark.parametrize("weekend_date", [SATURDAY, SUNDAY])
 def test_no_heartbeat_over_the_weekend_is_a_clean_night(weekend_date):
     result = build_result(_query_json([]), _heartbeat(0), weekend_date)
     assert result["action"] == ACTION_NONE
 
 
-def test_no_heartbeat_on_tuesday_is_telemetry_silent():
-    result = build_result(_query_json([]), _heartbeat(0), TUESDAY)
+def test_no_heartbeat_on_monday_is_telemetry_silent():
+    result = build_result(_query_json([]), _heartbeat(0), MONDAY)
     assert result["action"] == ACTION_TELEMETRY_SILENT
 
 
 def test_weekend_failures_with_no_heartbeat_are_not_flagged():
     rows = [_trace("2026-09-19T10:00:00Z", 3, "boom")]  # e.g. a Saturday process-now
-    result = build_result(_query_json(rows), _heartbeat(0), SUNDAY)
+    result = build_result(_query_json(rows), _heartbeat(0), SATURDAY)
     assert result["action"] == ACTION_DIGEST
     assert "no worker heartbeat" not in result["body"].lower()
 

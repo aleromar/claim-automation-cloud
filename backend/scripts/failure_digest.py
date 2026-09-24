@@ -87,14 +87,14 @@ def _heartbeat_count(query: dict[str, Any]) -> int:
 
 
 # datetime.weekday(): Monday == 0 … Sunday == 6.
-_NO_SCHEDULED_WAKE_IN_WINDOW: Final = frozenset({0, 6})
+_NO_SCHEDULED_WAKE: Final = frozenset({5, 6})
 
 
 def _heartbeat_expected(date: str) -> bool:
-    """The worker timer wakes 06–18 UTC Mon–Fri only (D5). The 05:00 UTC digest
-    looks back 25 h, so a Sunday or Monday digest window holds no scheduled wake
-    and zero heartbeats there is a quiet weekend, not dead telemetry."""
-    return dt.date.fromisoformat(date).weekday() not in _NO_SCHEDULED_WAKE_IN_WINDOW
+    """`date` is the UTC calendar day the queries cover. The worker timer wakes
+    06–18 UTC Mon–Fri only (D5), so a Saturday or Sunday holds no scheduled
+    wake and zero heartbeats there is a quiet weekend, not dead telemetry."""
+    return dt.date.fromisoformat(date).weekday() not in _NO_SCHEDULED_WAKE
 
 
 def _severity_label(row: dict[str, Any]) -> str:
@@ -199,7 +199,7 @@ def build_result(
                 "action": ACTION_TELEMETRY_SILENT,
                 "title": f"[auto] Telemetry silent {date}",
                 "body": (
-                    "No failure rows AND no worker heartbeat traces in the last 25 h. "
+                    f"No failure rows AND no worker heartbeat traces on {date} (UTC). "
                     "A quiet night is only a clean night if the worker's wake "
                     "logs are visible — telemetry may be dead (broken connection "
                     "string, recreated App Insights resource, stopped app)."
@@ -217,7 +217,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--failures", required=True, help="az failure-query JSON file")
     parser.add_argument("--heartbeat", required=True, help="az heartbeat-count JSON file")
-    parser.add_argument("--date", required=True, help="digest date, YYYY-MM-DD (UTC)")
+    parser.add_argument(
+        "--date", required=True, help="UTC calendar day the queries cover, YYYY-MM-DD"
+    )
     args = parser.parse_args(argv)
     result = build_result(
         json.loads(Path(args.failures).read_text()),
