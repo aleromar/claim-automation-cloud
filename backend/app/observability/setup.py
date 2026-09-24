@@ -192,6 +192,8 @@ def flush_telemetry(timeout_millis: int = 5000) -> None:
         t.start()
         t.join(timeout_millis / 1000)
         if t.is_alive():
-            logger.warning("telemetry flush abandoned after %sms", timeout_millis)
+            # INFO, not WARNING: nothing is lost (the batch keeps exporting after
+            # the join) and the nightly digest files everything at WARNING+.
+            logger.info("telemetry flush abandoned after %sms", timeout_millis)
     except Exception:
         logger.warning("telemetry flush could not start", exc_info=True)
