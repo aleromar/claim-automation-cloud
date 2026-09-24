@@ -15,6 +15,7 @@ the relabel earlier.
 import logging
 import re
 from datetime import UTC, datetime
+from email.utils import parseaddr
 from time import monotonic
 from typing import Final, Literal, Protocol, runtime_checkable
 
@@ -64,6 +65,46 @@ ACTION_CARD: Final = "card"
 ACTION_COMMENT: Final = "comment"
 ACTION_DEDUP_SKIP: Final = "dedup_skip"
 ProcessedAction = Literal["card", "comment", "dedup_skip"]
+# mailbox-trust-boundary REQ-2: the two rejection reasons, matched by tests and
+# by KQL on the email_failed line (`message has "sender_not_allowed"`).
+REASON_SENDER_NOT_ALLOWED: Final = "sender_not_allowed"
+REASON_NO_SENDER: Final = "no_sender"
+
+
+def parse_sender_allowlist(raw: str) -> frozenset[str]:
+    """CLAIM_SENDER_ALLOWLIST → lowercased domains (REQ-1). Empty, address-shaped
+    or space-containing entries are a configuration error: under exact matching
+    an address entry would silently reject every email, so it fails the RUN at
+    composition like a missing FOUNDRY_ENDPOINT."""
+    entries = frozenset(entry.strip().lower() for entry in raw.split(",") if entry.strip())
+    if not entries:
+        raise ValueError(
+            "CLAIM_SENDER_ALLOWLIST is not configured — the pipeline admits no sender without it "
+            "(set by the infra deployment as a Function App setting)"
+        )
+    # Count, never the values: the list is private and this message reaches
+    # the heartbeat and the nightly digest.
+    bad = sum(1 for entry in entries if "@" in entry or any(ch.isspace() for ch in entry))
+    if bad:
+        raise ValueError(
+            f"CLAIM_SENDER_ALLOWLIST has {bad} entr{'y' if bad == 1 else 'ies'} that are not bare "
+            "domains (exact match on the part after '@' of the From address; no addresses, no spaces)"
+        )
+    return entries
+
+
+def sender_domain(message: dict) -> str | None:
+    """Lowercased text after the last '@' of the parsed From address; None when
+    the header is missing or parseaddr yields no '@' (malformed, several
+    addresses, display-name spoofs — all fail closed, REQ-2.4)."""
+    headers = message.get("payload", {}).get("headers", [])
+    raw = next((h["value"] for h in headers if h["name"] == "From"), None)
+    if raw is None:
+        return None
+    _, address = parseaddr(raw)
+    if "@" not in address:
+        return None
+    return address.rpartition("@")[2].lower()
 
 
 def build_claim_query() -> str:
@@ -115,8 +156,12 @@ def process_mailbox(
     history: ClaimLedger,
     deadline: float,
     extractor=None,
+    *,
+    allowed_domains: frozenset[str],
 ) -> RunCounts:
-    """One run over the filtered UNREAD page, chronologically (REQ-1/2)."""
+    """One run over the filtered UNREAD page, chronologically (REQ-1/2).
+    `allowed_domains` is keyword-only with no default: a caller that forgets it
+    fails instead of admitting every sender (mailbox-trust-boundary REQ-2)."""
     procesado_id = gmail.get_or_create_label_id(LABEL_PROCESADO)
     failed_id = gmail.get_or_create_label_id(LABEL_FAILED)
     with _tracer.start_as_current_span("pipeline.fetch"):
@@ -150,7 +195,9 @@ def process_mailbox(
             break
         with _tracer.start_as_current_span("pipeline.email") as email_span:
             try:
-                action = _process_one(message, trello, membretes, history, extractor)
+                action = _process_one(
+                    message, trello, membretes, history, extractor, allowed_domains=allowed_domains
+                )
             except Exception as exc:
                 # Per-email boundary (REQ-2, deviation from the laptop's
                 # batch-abort): terminal `failed` label = the operator work queue.
@@ -215,7 +262,17 @@ def _process_one(
     membretes: MembreteSource,
     history: ClaimLedger,
     extractor,
+    *,
+    allowed_domains: frozenset[str],
 ) -> ProcessedAction:
+    # mailbox-trust-boundary REQ-2: origin before content. Nothing about the
+    # email is parsed — no extractor, no model call — until its sender domain
+    # is trusted; the boundary's `reason=` is str(exc), domain only.
+    domain = sender_domain(message)
+    if domain is None:
+        raise ValueError(REASON_NO_SENDER)
+    if domain not in allowed_domains:
+        raise ValueError(f"{REASON_SENDER_NOT_ALLOWED} domain={domain}")
     with _tracer.start_as_current_span("pipeline.parse_classify"):
         subject = ClaimData.extract_subject(message) or ""
         if not any(marker in subject for marker in CLAIM_SUBJECT_MARKERS):
@@ -291,9 +348,11 @@ def run_pipeline() -> RunCounts:
     store = get_state_store()
     with store.run_lease():
         secrets = get_store()
-        # First: the one composition step that can fail on config alone
-        # (llm without an endpoint, REQ-1.2) — fail before opening clients.
+        # First: the composition steps that can fail on config alone (llm
+        # without an endpoint, REQ-1.2; an empty sender allowlist,
+        # mailbox-trust-boundary REQ-1.3) — fail before opening clients.
         extractor = get_field_extractor(settings.field_extractor_backend, settings)
+        allowed_domains = parse_sender_allowlist(settings.claim_sender_allowlist)
         gmail = GmailClient(settings, secrets)
         trello = TrelloClient(settings, secrets, store.read_trello_config())
         try:
@@ -306,6 +365,7 @@ def run_pipeline() -> RunCounts:
                 store,
                 deadline=monotonic() + RUN_DEADLINE_S,
                 extractor=extractor,
+                allowed_domains=allowed_domains,
             )
         finally:
             try:

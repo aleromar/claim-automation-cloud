@@ -122,6 +122,10 @@ def functions_host(tmp_path_factory, azurite_connection_string):
         "SECRET_STORE_BACKEND": "file",
         "SECRET_STORE_FILE_PATH": str(secrets_path),
         "OPERATOR_EMAIL": "operator@example.com",
+        # mailbox-trust-boundary REQ-1: parsed at composition BEFORE the Gmail
+        # client, so the enabled wake below must get past it to reach the token
+        # preflight it asserts on (skipped_no_access, not failed).
+        "CLAIM_SENDER_ALLOWLIST": "allowed.test",
     }
 
     port = _free_port()
