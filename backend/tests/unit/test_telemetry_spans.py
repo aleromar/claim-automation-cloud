@@ -103,7 +103,12 @@ def _msg(msg_id: str, subject: str, internal_date: int = 1) -> dict:
         "id": msg_id,
         "internalDate": str(internal_date),
         "payload": {
-            "headers": [{"name": "Subject", "value": subject}],
+            # mailbox-trust-boundary: an allowed From, or the boundary rejects
+            # the email before any stage span is opened.
+            "headers": [
+                {"name": "Subject", "value": subject},
+                {"name": "From", "value": "avisos@allowed.test"},
+            ],
             "body": {"data": _b64("cuerpo")},
         },
     }
@@ -265,6 +270,7 @@ def _run_mailbox(messages) -> RunCounts:
         FakeHistory(),
         deadline=monotonic() + RUN_DEADLINE_S,
         extractor=FakeExtractor(),
+        allowed_domains=frozenset({"allowed.test"}),
     )
 
 
@@ -419,7 +425,7 @@ def test_pipeline_spans_noop_without_provider():
         "from test_telemetry_spans import FakeGmail, FakeTrello, FakeHistory, FakeMembretes\n"
         "from pipeline.entry import process_mailbox\n"
         "counts = process_mailbox(FakeGmail([]), FakeTrello(), FakeMembretes(), FakeHistory(),\n"
-        "                         deadline=monotonic() + 5)\n"
+        "                         deadline=monotonic() + 5, allowed_domains=frozenset({'allowed.test'}))\n"
         "print('noop-ok', counts.processed)\n"
     )
     backend_dir = Path(__file__).resolve().parents[2]  # cwd-independent (Gate 3 W4)
