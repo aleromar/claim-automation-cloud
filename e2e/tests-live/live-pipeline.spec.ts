@@ -208,7 +208,7 @@ test("all six claim types flow through the real pipeline in one run", async ({
   }
   // A seventh email with a claim subject from a domain the staging allowlist
   // does not hold: the boundary must reject it before parsing — `failed`
-  // label, no card, "1 fallidos" (mailbox-trust-boundary REQ-3.2).
+  // label, no card, "1 fallido" (mailbox-trust-boundary REQ-3.2).
   const rejectedRef = ref(5);
   rejectedMessageId = await gmail.insertClaimEmail(
     `AVISO: Declaración de siniestro a colaborador ${rejectedRef}`,
@@ -268,9 +268,10 @@ test("all six claim types flow through the real pipeline in one run", async ({
   await expect(page.getByText(/resultado:/i)).toHaveText(/resultado: completado/i, {
     timeout: 5_000,
   });
-  // 6 accepted + the one the sender allowlist rejects (REQ-3.2).
+  // 6 accepted + the one the sender allowlist rejects (REQ-3.2). Singular:
+  // strings.ts countsText pluralises per count.
   await expect(page.getByText(/última ejecución:/i)).toContainText(
-    /6 procesados, 1 fallidos/,
+    /6 procesados, 1 fallido\b/,
   );
 
   // Trello (REQ-1.2), ref-scoped per type: exactly one card each, on the
