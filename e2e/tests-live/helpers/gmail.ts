@@ -77,15 +77,18 @@ export class GmailLive {
     return ids.length;
   }
 
-  /** Seed the claim email: instant, searchable-eventually, labels set directly. */
-  async insertClaimEmail(subject: string, htmlBody: string): Promise<string> {
+  /** Seed the claim email: instant, searchable-eventually, labels set directly.
+   * `from` defaults to the mailbox itself — the domain staging's sender allowlist
+   * admits (mailbox-trust-boundary REQ-3.1); pass a foreign address to seed a
+   * rejected email (REQ-3.2). */
+  async insertClaimEmail(subject: string, htmlBody: string, from?: string): Promise<string> {
     const account = requireLiveEnv().GMAIL_ACCOUNT;
     // RFC 2047 length caps are exceeded by the long Spanish subject as a single
     // encoded-word; Gmail (the only consumer) accepts it — proven live 2026-08-25.
     const encodedSubject = `=?UTF-8?B?${Buffer.from(subject).toString("base64")}?=`;
     const bodyB64 = Buffer.from(htmlBody).toString("base64");
     const mime = [
-      `From: ${account}`,
+      `From: ${from ?? account}`,
       `To: ${account}`,
       `Subject: ${encodedSubject}`,
       "MIME-Version: 1.0",

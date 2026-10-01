@@ -33,10 +33,14 @@ from pipeline.entry import (
     ACTION_DEDUP_SKIP,
     LABEL_FAILED,
     LABEL_PROCESADO,
+    REASON_NO_SENDER,
+    REASON_SENDER_NOT_ALLOWED,
     RUN_DEADLINE_S,
     UNREAD_LABEL_ID,
     build_claim_query,
+    parse_sender_allowlist,
     process_mailbox,
+    sender_domain,
 )
 from pipeline.extraction import ClaimFields, ExtractorUsed
 
@@ -46,18 +50,29 @@ ASISTENCIA_SUBJECT = "Solicitud de asistencia a colaborador 2026/418"
 COMUNICACION_SUBJECT = "Comunicación a colaborador 2026/417"
 UNPARSEABLE_SUBJECT = "Declaración de siniestro a colaborador (sin referencia)"
 NO_MARKER_SUBJECT = "Solicitud de otra cosa 2026/999"
+# mailbox-trust-boundary: every fixture email comes from an allowed domain unless
+# a test says otherwise; the boundary rejects the rest before parsing.
+ALLOWED_DOMAINS = frozenset({"allowed.test"})
+ALLOWED_SENDER = "Aseguradora <avisos@allowed.test>"
+FOREIGN_SENDER = "Atacante <atacante@evil.test>"
 
 
 def _b64(text: str) -> str:
     return base64.urlsafe_b64encode(text.encode()).decode()
 
 
-def _msg(msg_id: str, subject: str, internal_date: int, body: str = "cuerpo") -> dict:
+def _msg(
+    msg_id: str,
+    subject: str,
+    internal_date: int,
+    body: str = "cuerpo",
+    sender: str = ALLOWED_SENDER,
+) -> dict:
     return {
         "id": msg_id,
         "internalDate": str(internal_date),
         "payload": {
-            "headers": [{"name": "Subject", "value": subject}],
+            "headers": [{"name": "Subject", "value": subject}, {"name": "From", "value": sender}],
             "body": {"data": _b64(body)},
         },
     }
@@ -167,7 +182,14 @@ class FakeMembretes:
         return self._png
 
 
-def _run(messages, trello=None, history=None, gmail=None, deadline_offset: float = RUN_DEADLINE_S):
+def _run(
+    messages,
+    trello=None,
+    history=None,
+    gmail=None,
+    deadline_offset: float = RUN_DEADLINE_S,
+    extractor=None,
+):
     from time import monotonic
 
     gmail = gmail if gmail is not None else FakeGmail(messages)
@@ -179,7 +201,8 @@ def _run(messages, trello=None, history=None, gmail=None, deadline_offset: float
         FakeMembretes(),
         history,
         deadline=monotonic() + deadline_offset,
-        extractor=FakeExtractor(),
+        extractor=extractor if extractor is not None else FakeExtractor(),
+        allowed_domains=ALLOWED_DOMAINS,
     )
     return counts, gmail, trello, history
 
@@ -214,6 +237,174 @@ def test_no_marker_subject_is_failed_not_left_unread():
     assert counts.failed == 1
     assert trello.created == []
     assert gmail.modifications == [("m1", [f"id-{LABEL_FAILED}"], [UNREAD_LABEL_ID])]
+
+
+# --- mailbox-trust-boundary REQ-1 / REQ-2.1 / REQ-2.4: allowlist grammar + sender domain ---
+
+
+def test_sender_allowlist_parses_domains():
+    # Whitespace, case and a trailing comma are operator typing, not entries.
+    parsed = parse_sender_allowlist(" Notificaciones.Example , otra.example,")
+    assert parsed == frozenset({"notificaciones.example", "otra.example"})
+
+
+def test_sender_allowlist_empty_is_a_value_error():
+    # The FOUNDRY_ENDPOINT rule: empty config fails the RUN, named so the
+    # heartbeat/digest reader knows which setting.
+    for raw in ("", " , "):
+        with pytest.raises(ValueError, match="CLAIM_SENDER_ALLOWLIST"):
+            parse_sender_allowlist(raw)
+
+
+def test_sender_allowlist_rejects_address_entries():
+    # Domains only: under exact matching an address would silently reject every email.
+    with pytest.raises(ValueError, match="CLAIM_SENDER_ALLOWLIST"):
+        parse_sender_allowlist("avisos@notificaciones.example")
+
+
+@pytest.mark.parametrize("raw", ["notificaciones example", "notificaciones\texample"])
+def test_sender_allowlist_rejects_internal_whitespace(raw):
+    with pytest.raises(ValueError, match="CLAIM_SENDER_ALLOWLIST"):
+        parse_sender_allowlist(raw)
+
+
+def test_sender_allowlist_error_never_echoes_the_entries():
+    # The list is private and the message reaches the heartbeat + digest:
+    # name the setting and the count, never the values.
+    with pytest.raises(ValueError) as excinfo:
+        parse_sender_allowlist("avisos@secreto.example, otro@secreto.example")
+    assert "secreto" not in str(excinfo.value)
+    assert "2" in str(excinfo.value)
+
+
+def _msg_from(from_header: str | None) -> dict:
+    headers = [{"name": "Subject", "value": CLAIM_SUBJECT}]
+    if from_header is not None:
+        headers.append({"name": "From", "value": from_header})
+    return {
+        "id": "m1",
+        "internalDate": "1",
+        "payload": {"headers": headers, "body": {"data": _b64("cuerpo")}},
+    }
+
+
+def test_sender_domain_handles_display_name():
+    assert (
+        sender_domain(_msg_from("Aseguradora <avisos@notificaciones.example>"))
+        == "notificaciones.example"
+    )
+
+
+def test_sender_domain_lowercases():
+    assert sender_domain(_msg_from("Avisos@Notificaciones.EXAMPLE")) == "notificaciones.example"
+
+
+def test_sender_domain_missing_header_is_none():
+    assert sender_domain(_msg_from(None)) is None
+
+
+def test_sender_domain_without_at_is_none():
+    assert sender_domain(_msg_from("undisclosed-recipients")) is None
+
+
+def test_sender_domain_multiple_addresses_is_none():
+    # parseaddr yields ('', '') for an address list: fail closed, no "first wins".
+    assert sender_domain(_msg_from("a@allowed.test, b@evil.test")) is None
+
+
+def test_sender_domain_display_name_spoof_uses_addr_spec():
+    # A quoted display name that looks like an address is not the address.
+    assert sender_domain(_msg_from('"avisos@allowed.test" <x@evil.test>')) == "evil.test"
+
+
+# --- mailbox-trust-boundary REQ-2: the sender check is the first thing the boundary does ---
+
+
+class CountingExtractor(FakeExtractor):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def extract(self, claim_type, subject, body, raw_body) -> ClaimFields:
+        self.calls += 1
+        return super().extract(claim_type, subject, body, raw_body)
+
+
+def test_unknown_sender_is_failed_before_parsing():
+    extractor = CountingExtractor()
+    counts, gmail, trello, history = _run(
+        [_msg("m1", CLAIM_SUBJECT, 100, sender=FOREIGN_SENDER)], extractor=extractor
+    )
+    assert counts == RunCounts(processed=0, failed=1, failed_total=0)
+    assert extractor.calls == 0  # no model call is ever spent on an untrusted sender
+    assert trello.created == [] and trello.comments == []
+    assert history.rows == {}
+    assert gmail.modifications == [("m1", [f"id-{LABEL_FAILED}"], [UNREAD_LABEL_ID])]
+
+
+def test_unknown_sender_warning_carries_domain_only(caplog):
+    with caplog.at_level(logging.WARNING, logger="pipeline.entry"):
+        _run([_msg("m1", CLAIM_SUBJECT, 100, sender=FOREIGN_SENDER)])
+    failed = [r.getMessage() for r in caplog.records if "email_failed" in r.getMessage()]
+    assert len(failed) == 1
+    assert f"reason={REASON_SENDER_NOT_ALLOWED} domain=evil.test" in failed[0]
+    assert "atacante" not in failed[0].lower()  # local part / display name never logged
+    assert "ref=2026/417" in failed[0]  # the bounded subject ref is unchanged
+
+
+def test_sender_check_precedes_marker_check(caplog):
+    # A foreign sender with a non-claim subject fails for the SENDER reason:
+    # nothing about the email is read before its origin is trusted.
+    with caplog.at_level(logging.WARNING, logger="pipeline.entry"):
+        _run([_msg("m1", NO_MARKER_SUBJECT, 100, sender=FOREIGN_SENDER)])
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(REASON_SENDER_NOT_ALLOWED in m for m in messages)
+    assert not any("no claim marker" in m for m in messages)
+
+
+def test_subdomain_of_allowed_domain_is_not_admitted():
+    # Exact match (operator, 2026-09-24): no subdomain expansion in either direction.
+    counts, _, trello, _ = _run([_msg("m1", CLAIM_SUBJECT, 100, sender="x@sub.allowed.test")])
+    assert counts.failed == 1
+    assert trello.created == []
+
+
+def test_missing_from_header_is_no_sender(caplog):
+    message = _msg("m1", CLAIM_SUBJECT, 100)
+    message["payload"]["headers"] = [
+        h for h in message["payload"]["headers"] if h["name"] != "From"
+    ]
+    with caplog.at_level(logging.WARNING, logger="pipeline.entry"):
+        counts, _, trello, _ = _run([message])
+    assert counts.failed == 1
+    assert trello.created == []
+    assert any(f"reason={REASON_NO_SENDER}" in r.getMessage() for r in caplog.records)
+
+
+def test_allowed_sender_is_processed_unchanged():
+    counts, gmail, trello, history = _run([_msg("m1", CLAIM_SUBJECT, 100, sender=ALLOWED_SENDER)])
+    assert counts == RunCounts(processed=1, failed=0, failed_total=0)
+    assert len(trello.created) == 1
+    assert "2026/417" in history.rows
+    assert gmail.modifications == [("m1", [f"id-{LABEL_PROCESADO}"], [UNREAD_LABEL_ID])]
+
+
+def test_sender_check_applies_under_regex_backend():
+    # No injected extractor = the regex path (llm-extraction REQ-1.3 parity);
+    # the boundary is the same under both backends (REQ-2.6).
+    from time import monotonic
+
+    gmail = FakeGmail([_msg("m1", CLAIM_SUBJECT, 100, sender=FOREIGN_SENDER)])
+    trello = FakeTrello()
+    counts = process_mailbox(
+        gmail,
+        trello,
+        FakeMembretes(),
+        FakeHistory(),
+        deadline=monotonic() + RUN_DEADLINE_S,
+        allowed_domains=ALLOWED_DOMAINS,
+    )
+    assert counts.failed == 1
+    assert trello.created == []
 
 
 # --- REQ-2: per-email boundary ---
@@ -314,6 +505,7 @@ def test_ledger_row_carries_the_extractor_provenance():
         history,
         deadline=monotonic() + RUN_DEADLINE_S,
         extractor=TaggingExtractor(),
+        allowed_domains=ALLOWED_DOMAINS,
     )
     assert history.rows["2026/417"].extractor_used == "llm"
 
@@ -560,7 +752,7 @@ def seams(monkeypatch):
     SeamClient.instances = []
     SeamEvents.log = []
     store = SeamStore()
-    settings = Settings()
+    settings = Settings(claim_sender_allowlist="allowed.test")
     factory = SeamFactory()
     monkeypatch.setattr(pipeline.entry, "GmailClient", SeamGmail)
     monkeypatch.setattr(pipeline.entry, "TrelloClient", SeamTrello)
@@ -681,6 +873,40 @@ def test_run_pipeline_propagates_extractor_config_error_and_releases_lease(seams
     assert seams.released is True
 
 
+def test_sender_allowlist_empty_fails_the_run_before_clients(seams):
+    # mailbox-trust-boundary REQ-1.2/1.3: the FOUNDRY_ENDPOINT rule — a missing
+    # allowlist fails the RUN at composition; no Gmail/Trello client is built.
+    from pipeline.entry import run_pipeline
+
+    seams.settings.claim_sender_allowlist = ""
+    with pytest.raises(ValueError, match="CLAIM_SENDER_ALLOWLIST"):
+        run_pipeline()
+    assert SeamClient.instances == []
+
+
+def test_run_pipeline_releases_lease_on_allowlist_error(seams):
+    from pipeline.entry import run_pipeline
+
+    seams.settings.claim_sender_allowlist = "avisos@allowed.test"  # an address, not a domain
+    with pytest.raises(ValueError, match="CLAIM_SENDER_ALLOWLIST"):
+        run_pipeline()
+    assert seams.released is True
+
+
+def test_run_pipeline_passes_the_allowlist_to_process_mailbox(seams, monkeypatch):
+    from pipeline.entry import run_pipeline
+
+    seen: dict = {}
+
+    def capturing_process(*args, **kwargs):
+        seen.update(kwargs)
+        return RunCounts(processed=0, failed=0, failed_total=0)
+
+    monkeypatch.setattr(pipeline.entry, "process_mailbox", capturing_process)
+    run_pipeline()
+    assert seen["allowed_domains"] == ALLOWED_DOMAINS
+
+
 def test_process_mailbox_without_extractor_falls_back_to_regex():
     # pipeline-core REQ-2 parity pinned (llm-extraction REQ-1.3): callers that
     # omit the extractor still get regex fields.
@@ -694,6 +920,7 @@ def test_process_mailbox_without_extractor_falls_back_to_regex():
         FakeMembretes(),
         history,
         deadline=monotonic() + RUN_DEADLINE_S,
+        allowed_domains=ALLOWED_DOMAINS,
     )
     record = history.rows["2026/417"]
     assert record.town == "Madrid"

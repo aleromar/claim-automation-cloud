@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     foundry_endpoint: str | None = None  # https://<account>.cognitiveservices.azure.com/openai/v1/
     foundry_deployment: str = "gpt-5-mini"
     llm_capture_content: bool = True  # prompt + answer on the gen_ai spans (REQ-5.2)
+    # mailbox-trust-boundary REQ-1: comma-separated sender domains, written by the
+    # infra repo; parsed in pipeline.entry at composition — empty fails the RUN,
+    # never the app. Values are private and never appear in this repo.
+    claim_sender_allowlist: str = ""
     membretes_container: str = "membretes"  # private Blob container (D26, amended)
     # Consumed by 5c's composition root when it builds the BlobMembreteSource;
     # no validator yet — a hard requirement would break the deployed app before

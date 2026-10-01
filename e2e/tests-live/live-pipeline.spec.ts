@@ -79,6 +79,10 @@ const trello = new TrelloLive();
 // whatever exists at the point of failure.
 let claimRefs: string[] = [];
 let seededMessageIds: string[] = [];
+// The one seeded email the sender allowlist must reject (mailbox-trust-boundary
+// REQ-3.2). It is also in seededMessageIds so teardown trashes it: a rejected
+// email loses UNREAD, so the pre-run sweep would never pick it up.
+let rejectedMessageId: string | null = null;
 let jwt: string | null = null;
 
 test.afterEach(async () => {
@@ -124,6 +128,7 @@ test("all six claim types flow through the real pipeline in one run", async ({
   // Reset per attempt: a retry must not inherit attempt 1's teardown state.
   claimRefs = [];
   seededMessageIds = [];
+  rejectedMessageId = null;
   // JWT first — it needs no live call, and teardown's worker-OFF depends on it.
   jwt = mintSessionJwt();
 
@@ -201,6 +206,16 @@ test("all six claim types flow through the real pipeline in one run", async ({
   for (const seed of seeds) {
     seededMessageIds.push(await gmail.insertClaimEmail(seed.subject, seed.body));
   }
+  // A seventh email with a claim subject from a domain the staging allowlist
+  // does not hold: the boundary must reject it before parsing — `failed`
+  // label, no card, "1 fallido" (mailbox-trust-boundary REQ-3.2).
+  const rejectedRef = ref(5);
+  rejectedMessageId = await gmail.insertClaimEmail(
+    `AVISO: Declaración de siniestro a colaborador ${rejectedRef}`,
+    ASITUR_BODY,
+    "rechazado@nadie.invalid",
+  );
+  seededMessageIds.push(rejectedMessageId);
   // Gmail's q-search index lags inserts; the pipeline lists via q (REQ-1.1).
   await gmail.waitUntilSearchable(seededMessageIds);
 
@@ -253,8 +268,10 @@ test("all six claim types flow through the real pipeline in one run", async ({
   await expect(page.getByText(/resultado:/i)).toHaveText(/resultado: completado/i, {
     timeout: 5_000,
   });
+  // 6 accepted + the one the sender allowlist rejects (REQ-3.2). Singular:
+  // strings.ts countsText pluralises per count.
   await expect(page.getByText(/última ejecución:/i)).toContainText(
-    /6 procesados, 0 fallidos/,
+    /6 procesados, 1 fallido\b/,
   );
 
   // Trello (REQ-1.2), ref-scoped per type: exactly one card each, on the
@@ -306,11 +323,20 @@ test("all six claim types flow through the real pipeline in one run", async ({
   const downloadPath = await download.path();
   expectZipIsThePhoto(new Uint8Array(readFileSync(downloadPath)), photo, "browser");
 
-  // Gmail (REQ-1.3), every seeded message: UNREAD gone, procesado present
+  // Gmail (REQ-1.3), every accepted message: UNREAD gone, procesado present
   // (created lowercase on a fresh mailbox; lookup is case-insensitive).
-  for (const id of seededMessageIds) {
+  for (const id of seededMessageIds.filter((id) => id !== rejectedMessageId)) {
     const labels = (await gmail.labelNames(id)).map((name) => name.toLowerCase());
     expect(labels, id).not.toContain("unread");
     expect(labels, id).toContain("procesado");
   }
+  // The foreign sender: terminal `failed`, never processed, no card of its own
+  // (mailbox-trust-boundary REQ-3.2; its ref is distinct from every accepted seed).
+  const rejectedLabels = (await gmail.labelNames(rejectedMessageId as string)).map((name) =>
+    name.toLowerCase(),
+  );
+  expect(rejectedLabels).not.toContain("unread");
+  expect(rejectedLabels).toContain("failed");
+  expect(rejectedLabels).not.toContain("procesado");
+  expect(await trello.openCardsWithRef(rejectedRef)).toEqual([]);
 });

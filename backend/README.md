@@ -20,7 +20,10 @@ client secret, or `OPERATOR_EMAIL` is missing:
    file secret store with a random signing key and a **placeholder** client
    secret (enough to boot; real logins need step 3).
 2. `cp .env.example .env` and fill in the non-secret config, including
-   `OPERATOR_EMAIL` (the single allowed Google account). The **launcher** loads
+   `OPERATOR_EMAIL` (the single allowed Google account) and
+   `CLAIM_SENDER_ALLOWLIST` (comma-separated sender domains the pipeline admits —
+   the app boots without it, but every worker run fails at composition until it
+   is set; use your dev mailbox's domain). The **launcher** loads
    this file (`make dev` / the `--env-file` flag above); the app itself reads
    only environment variables, exactly like prod.
 3. For a **real** Google login replace the placeholder client secret in the
