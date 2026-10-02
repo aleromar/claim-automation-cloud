@@ -14,6 +14,7 @@ export const CLAIM_MARKER_QUERY = [
   "Declaración de siniestro a colaborador",
   "Solicitud de asistencia a colaborador",
   "Comunicación a colaborador",
+  "Gestión con Perito",
 ]
   .map((marker) => `subject:"${marker}"`)
   .join(" OR ");
@@ -99,6 +100,39 @@ export class GmailLive {
       // today's Gmail, but folding is cheap insurance.
       ...(bodyB64.match(/.{1,76}/g) ?? []),
     ].join("\r\n");
+    return this.insertMime(mime);
+  }
+
+  /** Seed in the insurer's Outlook shape (gestion-perito REQ-5): multipart/
+   * alternative, text/plain + text/html, both iso-8859-1 — so the run also
+   * proves the accents survive the Gmail API's decoding. Base64 transfer
+   * encoding where the original uses quoted-printable: the charset is the
+   * point, and Gmail strips either before the pipeline sees the part. */
+  async insertLatin1Email(subject: string, plainBody: string, htmlBody: string): Promise<string> {
+    const account = requireLiveEnv().GMAIL_ACCOUNT;
+    const boundary = `live-e2e-${Date.now()}`;
+    const part = (contentType: string, body: string): string[] => [
+      `--${boundary}`,
+      `Content-Type: ${contentType}; charset="iso-8859-1"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      ...(Buffer.from(body, "latin1").toString("base64").match(/.{1,76}/g) ?? []),
+    ];
+    const mime = [
+      `From: ${account}`,
+      `To: ${account}`,
+      `Subject: =?UTF-8?B?${Buffer.from(subject).toString("base64")}?=`,
+      "MIME-Version: 1.0",
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      "",
+      ...part("text/plain", plainBody),
+      ...part("text/html", htmlBody),
+      `--${boundary}--`,
+    ].join("\r\n");
+    return this.insertMime(mime);
+  }
+
+  private async insertMime(mime: string): Promise<string> {
     // internalDateSource pinned: insert DEFAULTS to receivedTime (= now, what the
     // pipeline's date-ordering needs) but messages.import defaults dateHeader —
     // explicit beats a silent-refactor hazard.

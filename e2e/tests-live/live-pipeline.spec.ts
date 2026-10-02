@@ -15,13 +15,14 @@ import { GmailLive } from "./helpers/gmail";
 import { injectSession, mintSessionJwt } from "./helpers/session";
 import { TrelloLive } from "./helpers/trello";
 
-// Live smoke (live-e2e REQ-1/2): ALL SIX claim types through the REAL pipeline
+// Live smoke (live-e2e REQ-1/2): ALL SEVEN claim types through the REAL pipeline
 // in one batch run — real Gmail, real Trello, deployed staging. Lifecycle:
-// sweep → mint refs (per attempt) → seed 6 → poll searchable → settings →
+// sweep → mint refs (per attempt) → seed 7 → poll searchable → settings →
 // worker ON (UI) → Process now → assert UI + per-type Trello + Gmail → teardown.
-// The comunicación email reuses the declaración's ref and is seeded LAST:
-// internalDate ordering guarantees the card exists when its comment arrives
-// (find_card_by_claim_ref scans board lists directly — no search-index lag).
+// The comunicación and Gestión con Perito emails reuse the declaración's ref
+// and are seeded LAST: internalDate ordering guarantees the card exists when
+// their comments arrive (find_card_by_claim_ref scans board lists directly —
+// no search-index lag).
 
 // The canonical full-field parseable body (test_claim_parsing.py) — PLAIN_BODY
 // lacks Localidad: and would crash build_card_name via town=None.
@@ -59,6 +60,26 @@ const PROCESS_NOW_BUDGET_MS = PROCESS_NOW_BASELINE_MS + PROCESS_NOW_MARGIN_MS;
 // download endpoint (spec Confidence notes).
 const PHOTO_NAME = "foto salón 1.jpg";
 const PHOTO_BYTES = 4096;
+
+// Gestión con Perito (gestion-perito REQ-5): the insurer's fixed notice, then
+// its AVISO LEGAL disclaimer — only the notice may reach the card. The accents
+// are the point: the email is seeded as iso-8859-1, like the real one.
+const gestionNotice = (perito: string): string =>
+  [
+    `Le informamos que en este expediente interviene el perito ${perito}.Teléfono de contacto 900 000 000 Correo Electrónico perito.live@example.com`,
+    "No continúe con los trabajos y permanezca a la espera de recibir instrucciones del perito para que valore el siniestro.",
+    "Hasta que no obtenga el conforme pericial, le recordamos que no dispone de autorización para continuar con los trabajos.",
+  ].join("\n");
+const AVISO_LEGAL =
+  "AVISO LEGAL:\nEste correo y sus archivos asociados pueden contener información de carácter reservado y confidencial.";
+const gestionHtml = (notice: string): string =>
+  `<html>\n<head>\n<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">\n</head>\n<body>\n` +
+  `<p>${notice.split("\n").join("\n<br>\n")}\n</p>\n` +
+  `<div style="font-family: Arial, sans-serif;">\n<strong>AVISO LEGAL:</strong><br>\n` +
+  `${AVISO_LEGAL.split("\n")[1]}</div>\n</body>\n</html>\n`;
+// Whitespace-normalised: staging runs the LLM backend, whose copy of the
+// notice is asserted for its text, not its line breaks (operator, G7).
+const normalize = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 const sha256 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("hex");
@@ -122,7 +143,7 @@ test.afterEach(async () => {
   }
 });
 
-test("all six claim types flow through the real pipeline in one run", async ({
+test("all seven claim types flow through the real pipeline in one run", async ({
   page,
 }) => {
   // Reset per attempt: a retry must not inherit attempt 1's teardown state.
@@ -206,6 +227,18 @@ test("all six claim types flow through the real pipeline in one run", async ({
   for (const seed of seeds) {
     seededMessageIds.push(await gmail.insertClaimEmail(seed.subject, seed.body));
   }
+  // Gestión con Perito, after the comunicación: the declaración's ref without
+  // its slash (year, a zero, the number — the parser drops the zeros), in the
+  // insurer's two-part iso-8859-1 shape (gestion-perito REQ-5).
+  const declaracionNumber = declaracionRef.split("/")[1];
+  const notice = gestionNotice(`PERITO LIVE ${base}`);
+  seededMessageIds.push(
+    await gmail.insertLatin1Email(
+      `${year}0${declaracionNumber} Gestión con Perito`,
+      `${notice}\n\n${AVISO_LEGAL}\n`,
+      gestionHtml(notice),
+    ),
+  );
   // A seventh email with a claim subject from a domain the staging allowlist
   // does not hold: the boundary must reject it before parsing — `failed`
   // label, no card, "1 fallido" (mailbox-trust-boundary REQ-3.2).
@@ -268,10 +301,10 @@ test("all six claim types flow through the real pipeline in one run", async ({
   await expect(page.getByText(/resultado:/i)).toHaveText(/resultado: completado/i, {
     timeout: 5_000,
   });
-  // 6 accepted + the one the sender allowlist rejects (REQ-3.2). Singular:
+  // 7 accepted + the one the sender allowlist rejects (REQ-3.2). Singular:
   // strings.ts countsText pluralises per count.
   await expect(page.getByText(/última ejecución:/i)).toContainText(
-    /6 procesados, 1 fallido\b/,
+    /7 procesados, 1 fallido\b/,
   );
 
   // Trello (REQ-1.2), ref-scoped per type: exactly one card each, on the
@@ -299,6 +332,20 @@ test("all six claim types flow through the real pipeline in one run", async ({
     declaracionComments.some((c) => c === `@board ${observaciones}`),
     "comunicación comment missing on the declaración card",
   ).toBe(true);
+  // gestion-perito REQ-5: the notice landed on the SAME card, once, accents
+  // intact (it was seeded as iso-8859-1), the disclaimer cut off — and the
+  // ref-scoped toHaveLength(1) above pinned that it created no card of its own.
+  const gestionComments = declaracionComments.filter((c) =>
+    c.startsWith("@board Le informamos"),
+  );
+  expect(
+    gestionComments.map(normalize),
+    "Gestión con Perito comment on the declaración card",
+  ).toEqual([normalize(`@board ${notice}`)]);
+  expect(
+    declaracionComments.filter((c) => c.includes("AVISO LEGAL")),
+    "no comment carries the AVISO LEGAL disclaimer",
+  ).toEqual([]);
 
   // Attachment download (attachment-download REQ-5): a photo uploaded to the
   // declaración card comes back byte-identical, first straight from the API,
