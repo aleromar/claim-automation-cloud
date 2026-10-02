@@ -14,7 +14,7 @@ import pytest
 from PIL import Image as PILImage
 from PIL import UnidentifiedImageError
 
-from pipeline.claim_data import ClaimType
+from pipeline.claim_data import COMMENT_TYPES, ClaimType
 from pipeline.pdf_gen import MEMBRETE_BY_TYPE, generate_pdf_from_email
 
 SAMPLE_BODY = "Compañía: Reale\nNif: H12345678\nDirección: CL FICTICIA 12\n"
@@ -106,10 +106,11 @@ def test_membrete_mapping_is_pinned():
     }
 
 
-def test_only_comunicacion_is_unmapped():
+def test_only_comment_types_are_unmapped():
     """Guards 5a2/future enum additions: a new ClaimType must get a membrete
-    (or an explicit decision), never fall into the raise by accident."""
-    assert set(ClaimType) - set(MEMBRETE_BY_TYPE) == {ClaimType.COMUNICACION_A_COLABORADOR}
+    (or an explicit decision), never fall into the raise by accident. Comment
+    types post on an existing card and never render a PDF."""
+    assert set(ClaimType) - set(MEMBRETE_BY_TYPE) == COMMENT_TYPES
 
 
 def test_body_text_grows_the_pdf(membretes):

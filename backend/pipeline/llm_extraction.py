@@ -45,7 +45,7 @@ from pydantic_ai.output import NativeOutput
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from core.config import Settings
-from pipeline.claim_data import ClaimType
+from pipeline.claim_data import COMMENT_TYPES, ClaimType
 from pipeline.extraction import ClaimFields, ExtractorUsed, FailureClass, RegexFieldExtractor
 
 logger = logging.getLogger(__name__)
@@ -154,7 +154,8 @@ class SiniestroFields(_TracksNulled):
 
 
 class ComunicacionFields(_TracksNulled):
-    """Strict output schema for COMUNICACION_A_COLABORADOR (D-e)."""
+    """Strict output schema for the comment types — COMUNICACION_A_COLABORADOR
+    (D-e) and GESTION_CON_PERITO."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -163,11 +164,7 @@ class ComunicacionFields(_TracksNulled):
 
 # Exhaustive over ClaimType (REQ-2.7) — a new member lands here automatically.
 OUTPUT_MODEL_BY_TYPE: Final[dict[ClaimType, type[_TracksNulled]]] = {
-    claim_type: (
-        ComunicacionFields
-        if claim_type is ClaimType.COMUNICACION_A_COLABORADOR
-        else SiniestroFields
-    )
+    claim_type: (ComunicacionFields if claim_type in COMMENT_TYPES else SiniestroFields)
     for claim_type in ClaimType
 }
 
@@ -251,8 +248,8 @@ def classify_failure(exc: BaseException, finish_reason: str | None) -> FailureCl
 
 
 def _to_claim_fields(output: BaseModel, claim_type: ClaimType) -> ClaimFields:
-    # The other branch's fields stay None (REQ-2.4); observaciones for
-    # comunicación only is enforced by construction (REQ-2.3).
+    # The other branch's fields stay None (REQ-2.4); observaciones for the
+    # comment types only is enforced by construction (REQ-2.3).
     return ClaimFields(**output.model_dump(), extractor_used=ExtractorUsed.LLM)
 
 

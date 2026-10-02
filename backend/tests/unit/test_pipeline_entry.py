@@ -42,7 +42,7 @@ from pipeline.entry import (
     process_mailbox,
     sender_domain,
 )
-from pipeline.extraction import ClaimFields, ExtractorUsed
+from pipeline.extraction import ClaimFields, ExtractorUsed, RegexFieldExtractor
 
 CLAIM_SUBJECT = "AVISO: Declaración de siniestro a colaborador 2026/417"
 URGENTE_SUBJECT = "Declaración de siniestro urgente a colaborador 2026/500"
@@ -552,6 +552,111 @@ def test_comunicacion_ignores_the_ledger():
     assert counts.failed == 1
 
 
+# --- gestion-perito REQ-4: Gestión con Perito comments the existing card ---
+
+GESTION_SUBJECT = "209901000017 Gestión con Perito"
+GESTION_NOTICE = "Le informamos que en este expediente interviene el perito X.\nNo continúe."
+GESTION_BODY = GESTION_NOTICE + "\n\nAVISO LEGAL:\nEste correo ..."
+
+
+class NoticeExtractor:
+    """Stands in for either backend: returns a fixed notice."""
+
+    def __init__(self, notice: str | None) -> None:
+        self._notice = notice
+
+    def extract(self, claim_type, subject, body, raw_body) -> ClaimFields:
+        return ClaimFields(observaciones=self._notice)
+
+
+def _gestion(body: str = GESTION_BODY) -> dict:
+    return _msg("m1", GESTION_SUBJECT, 100, body=body)
+
+
+def _failed_reasons(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if "email_failed" in r.getMessage()]
+
+
+def test_gestion_comments_existing_card_no_ledger(caplog):
+    history = FakeHistory()
+    history.rows["2099/1000017"] = object()  # ignored: live search, like comunicación
+    trello = FakeTrello(existing_card={"id": "card-9", "name": "LEON 2099/1000017 X"})
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        counts, gmail, trello, history = _run(
+            [_gestion()], trello=trello, history=history, extractor=RegexFieldExtractor()
+        )
+    assert counts.processed == 1
+    assert trello.searched == ["2099/1000017"]
+    assert trello.created == []
+    assert trello.comments == [("card-9", f"@board {GESTION_NOTICE}")]
+    assert list(history.rows) == ["2099/1000017"]  # nothing written
+    assert gmail.modifications == [("m1", [f"id-{LABEL_PROCESADO}"], [UNREAD_LABEL_ID])]
+    (line,) = _processed_lines(caplog)
+    assert "ref=2099/1000017" in line and f"action={ACTION_COMMENT}" in line
+
+
+def test_gestion_without_card_is_failed_with_its_own_reason(caplog):
+    from pipeline.entry import REASON_GESTION_NO_CARD
+
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        counts, gmail, trello, _ = _run([_gestion()], extractor=RegexFieldExtractor())
+    assert counts.failed == 1
+    assert trello.comments == []
+    assert gmail.modifications == [("m1", [f"id-{LABEL_FAILED}"], [UNREAD_LABEL_ID])]
+    (line,) = _failed_reasons(caplog)
+    assert REASON_GESTION_NO_CARD.format(ref="2099/1000017") in line
+    assert "ref=2099/1000017" in line  # _claim_ref_of reads the slashless subject
+
+
+@pytest.mark.parametrize("notice", [None, "", "  \n "])
+def test_gestion_without_notice_text_fails_before_trello(notice, caplog):
+    from pipeline.entry import REASON_NO_NOTICE_TEXT
+
+    trello = FakeTrello(existing_card={"id": "card-9", "name": "LEON 2099/1000017 X"})
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        counts, gmail, trello, _ = _run(
+            [_gestion()], trello=trello, extractor=NoticeExtractor(notice)
+        )
+    assert counts.failed == 1
+    assert trello.searched == [] and trello.comments == []
+    (line,) = _failed_reasons(caplog)
+    assert REASON_NO_NOTICE_TEXT.format(ref="2099/1000017") in line
+
+
+@pytest.mark.parametrize(
+    "extractor", [RegexFieldExtractor(), NoticeExtractor(GESTION_NOTICE)], ids=["regex", "stub"]
+)
+def test_gestion_without_aviso_legal_warns_and_still_comments(extractor, caplog):
+    from pipeline.entry import EVENT_NO_AVISO_LEGAL
+
+    trello = FakeTrello(existing_card={"id": "card-9", "name": "LEON 2099/1000017 X"})
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        counts, _, trello, _ = _run(
+            [_gestion(body=GESTION_NOTICE)], trello=trello, extractor=extractor
+        )
+    assert counts.processed == 1
+    assert trello.comments == [("card-9", f"@board {GESTION_NOTICE}")]
+    (warning,) = [r for r in caplog.records if EVENT_NO_AVISO_LEGAL in r.getMessage()]
+    assert warning.levelno == logging.WARNING
+    assert "ref=2099/1000017" in warning.getMessage() and "id=m1" in warning.getMessage()
+
+
+def test_gestion_with_aviso_legal_does_not_warn(caplog):
+    from pipeline.entry import EVENT_NO_AVISO_LEGAL
+
+    trello = FakeTrello(existing_card={"id": "card-9", "name": "LEON 2099/1000017 X"})
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        _run([_gestion()], trello=trello, extractor=RegexFieldExtractor())
+    assert not [r for r in caplog.records if EVENT_NO_AVISO_LEGAL in r.getMessage()]
+
+
+def test_comunicacion_keeps_its_no_card_reason(caplog):
+    with caplog.at_level(logging.INFO, logger="pipeline.entry"):
+        _run([_msg("m1", COMUNICACION_SUBJECT, 100)])
+    (line,) = _failed_reasons(caplog)
+    assert "comunicación 2026/417 has no existing card" in line
+
+
 # --- REQ-5: counts + gauge ---
 
 
@@ -649,12 +754,13 @@ def test_log_prefix_matches_the_worker_prefix():
     assert pipeline.entry._PIPELINE_LOG_PREFIX.startswith(WORKER_RUN_LOG_PREFIX)
 
 
-def test_markers_are_the_three_classification_literals():
+def test_markers_are_the_four_classification_literals():
     # C6 single-source guard carried over from 5b.
     assert CLAIM_SUBJECT_MARKERS == (
         "Declaración de siniestro a colaborador",
         "Solicitud de asistencia a colaborador",
         "Comunicación a colaborador",
+        "Gestión con Perito",
     )
 
 
