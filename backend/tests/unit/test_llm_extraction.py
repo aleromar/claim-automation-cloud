@@ -24,7 +24,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from pydantic_ai.models.function import FunctionModel
 
 from core.config import Settings
-from pipeline.claim_data import ClaimType
+from pipeline.claim_data import COMMENT_TYPES, ClaimType
 from pipeline.extraction import (
     CLAIM_VALUE_FIELDS,
     EXTRACTOR_LLM,
@@ -153,10 +153,11 @@ def _timeout_error() -> ModelAPIError:
 
 def test_output_model_selection_is_exhaustive_over_claim_type():
     assert set(OUTPUT_MODEL_BY_TYPE) == set(ClaimType)
-    assert OUTPUT_MODEL_BY_TYPE[ClaimType.COMUNICACION_A_COLABORADOR] is ComunicacionFields
+    # Comment types (comunicación, gestión con perito) read only observaciones.
     for claim_type in ClaimType:
-        if claim_type is not ClaimType.COMUNICACION_A_COLABORADOR:
-            assert OUTPUT_MODEL_BY_TYPE[claim_type] is SiniestroFields
+        expected = ComunicacionFields if claim_type in COMMENT_TYPES else SiniestroFields
+        assert OUTPUT_MODEL_BY_TYPE[claim_type] is expected, claim_type
+    assert OUTPUT_MODEL_BY_TYPE[ClaimType.GESTION_CON_PERITO] is ComunicacionFields
     assert set(SiniestroFields.model_fields) | set(ComunicacionFields.model_fields) == set(
         CLAIM_VALUE_FIELDS
     )

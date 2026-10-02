@@ -14,7 +14,7 @@ from typing import Final, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from core.config import Settings
-from pipeline.claim_data import ClaimType
+from pipeline.claim_data import ClaimType, gestion_notice
 
 EXTRACTOR_REGEX = "regex"
 EXTRACTOR_LLM = "llm"
@@ -101,6 +101,10 @@ class RegexFieldExtractor:
                     body, r"Observaciones:\s*(.*?)(?:\n--|$)", multiline=True
                 ),
                 extractor_used=ExtractorUsed.REGEX,
+            )
+        if claim_type == ClaimType.GESTION_CON_PERITO:
+            return ClaimFields(
+                observaciones=gestion_notice(body), extractor_used=ExtractorUsed.REGEX
             )
         return ClaimFields(
             insurance_company=_extract_field(body, r"Compañía:\s*(.+)"),

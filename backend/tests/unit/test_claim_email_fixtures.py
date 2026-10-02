@@ -97,6 +97,31 @@ def test_no_pii_leaked_back_into_fixture(case):
     assert_only_placeholders(_part(case, "txt") + _part(case, "html"))
 
 
+@pytest.mark.parametrize(
+    "leak",
+    [
+        "Teléfono de contacto 979 12 34 56 Correo",  # real-shaped spaced phone, invented (gestion-perito)
+        "+34 655 123 456",
+        "202601234567 Gestión con Perito",  # slashless real-year ref
+    ],
+)
+def test_tripwire_catches_spaced_phones_and_slashless_refs(leak):
+    with pytest.raises(AssertionError):
+        assert_only_placeholders(leak)
+
+
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "Teléfono de contacto 900 000 017 Correo",
+        "CONTACTO ¿611 11 11 11 CONTACTO PERJ. - +34 622 22 22 22",  # existing synthetic fakes
+        "209901000017 Gestión con Perito",
+    ],
+)
+def test_tripwire_accepts_spaced_and_slashless_placeholders(placeholder):
+    assert_only_placeholders(placeholder)
+
+
 @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
 def test_gold_values_are_grounded_in_the_text_part(case):
     """The gold set must be readable off the fixture — and doubles as the
@@ -365,10 +390,13 @@ def test_rendered_report_carries_the_column_and_the_pairs():
 @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
 def test_xhtml_stripped_arm_drops_presentation_attributes_and_keeps_text(case):
     # REQ-6.5 / D-c: arm (b′) exists only here, as a switchable eval input.
-    stripped = strip_attributes(_part(case, "html"))
-    assert not re.search(r'\s(class|style|id|lang|dir|xml:\w+)="', stripped), case["slug"]
-    assert len(stripped) < len(_part(case, "html"))
-    assert "Compañía" in stripped or "Comunicación" in stripped
+    html = _part(case, "html")
+    stripped = strip_attributes(html)
+    presentation = r'\s(class|style|id|lang|dir|xml:\w+)="'
+    assert not re.search(presentation, stripped), case["slug"]
+    # A gestion-perito part without its AVISO LEGAL block carries no such attribute.
+    assert len(stripped) < len(html) or not re.search(presentation, html)
+    assert any(word in stripped for word in ("Compañía", "Comunicación", "perito"))
     assert case_body(case, ARM_PLAIN) == _part(case, "txt")
     assert case_body(case, ARM_XHTML_STRIPPED) == stripped
 

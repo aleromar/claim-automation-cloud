@@ -398,3 +398,114 @@ def test_every_claim_subject_marker_is_recognized_by_from_subject():
             f"AVISO: {marker} 2026/1", "atención: SERVICIO BRICO HOGAR"
         )
         assert claim_type is not None, f"marker not classified: {marker!r}"
+
+
+# ---------------------------------------------------------------------------
+# Gestión con Perito (gestion-perito spec, roadmap #24)
+# ---------------------------------------------------------------------------
+
+GESTION_SUBJECT = "209901000017 Gestión con Perito"
+
+GESTION_NOTICE = (
+    "Le informamos que en este expediente interviene el perito PERITO EJEMPLO.Teléfono de "
+    "contacto 900 000 017 Correo Electrónico perito.ejemplo@example.com\n"
+    "No continúe con los trabajos y permanezca a la espera de recibir instrucciones del perito "
+    "para que valore el siniestro.\n"
+    "Hasta que no obtenga el conforme pericial, le recordamos que no dispone de autorización "
+    "para continuar con los trabajos."
+)
+
+GESTION_BODY = GESTION_NOTICE + "\n\nAVISO LEGAL:\nEste correo y sus archivos asociados ...\n"
+
+
+class TestGestionConPeritoClassification:
+    def test_marker_is_fetched_by_the_gmail_query(self):
+        from pipeline.claim_data import CLAIM_SUBJECT_MARKERS, GESTION_PERITO_MARKER
+        from pipeline.entry import build_claim_query
+
+        assert GESTION_PERITO_MARKER == "Gestión con Perito"  # accent kept: Gmail search needs it
+        assert GESTION_PERITO_MARKER in CLAIM_SUBJECT_MARKERS
+        assert f'subject:"{GESTION_PERITO_MARKER}"' in build_claim_query()
+
+    def test_claim_type_value_is_the_marker(self):
+        from pipeline.claim_data import GESTION_PERITO_MARKER
+
+        assert ClaimType.GESTION_CON_PERITO.value == GESTION_PERITO_MARKER
+
+    def test_classified_regardless_of_body(self):
+        assert ClaimType.from_subject(GESTION_SUBJECT, None) is ClaimType.GESTION_CON_PERITO
+        assert ClaimType.from_subject(GESTION_SUBJECT, "") is ClaimType.GESTION_CON_PERITO
+
+    def test_wins_over_another_marker_without_raising(self):
+        # Checked first: the asistencia branch would raise without a body service marker.
+        subject = "209901000017 Gestión con Perito — Solicitud de asistencia a colaborador"
+        assert ClaimType.from_subject(subject, "sin servicio") is ClaimType.GESTION_CON_PERITO
+
+    def test_slashless_subject_parses_year_and_number(self):
+        claim = ClaimData.from_msg_data(_make_gmail_message(GESTION_SUBJECT, GESTION_BODY))
+
+        assert claim is not None
+        assert claim.type is ClaimType.GESTION_CON_PERITO
+        assert (claim.year, claim.claim_number) == ("2099", "1000017")
+
+    def test_regex_notice_is_the_body_up_to_aviso_legal(self):
+        claim = ClaimData.from_msg_data(_make_gmail_message(GESTION_SUBJECT, GESTION_BODY))
+
+        assert claim is not None
+        assert claim.observaciones == GESTION_NOTICE
+        assert claim.insurance_company is None and claim.town is None
+
+    def test_regex_notice_without_aviso_legal_is_the_whole_body(self):
+        claim = ClaimData.from_msg_data(_make_gmail_message(GESTION_SUBJECT, GESTION_NOTICE + "\n"))
+
+        assert claim is not None
+        assert claim.observaciones == GESTION_NOTICE
+
+    def test_regex_notice_trims_crlf_and_emphasis_markers(self):
+        body = "\r\n" + GESTION_NOTICE.replace("\n", "\r\n") + "\r\n*AVISO LEGAL:*\r\nresto"
+        claim = ClaimData.from_msg_data(_make_gmail_message(GESTION_SUBJECT, body))
+
+        assert claim is not None
+        assert claim.observaciones == GESTION_NOTICE.replace("\n", "\r\n")
+
+    def test_regex_notice_of_an_empty_body_is_none(self):
+        claim = ClaimData.from_msg_data(_make_gmail_message(GESTION_SUBJECT, "\nAVISO LEGAL: x"))
+
+        assert claim is not None
+        assert claim.observaciones is None
+
+
+class TestParseClaimRef:
+    @pytest.mark.parametrize(
+        "subject,expected",
+        [
+            ("202601234567 Gestión con Perito", ("2026", "1234567")),
+            ("Fwd: 202609876543 Gestión con Perito", ("2026", "9876543")),
+            ("202600001234 Gestión con Perito", ("2026", "1234")),  # several zeros
+            ("2026056646 Gestión con Perito", ("2026", "56646")),  # 10 digits: the minimum
+            ("2026/1234567 Gestión con Perito", ("2026", "1234567")),  # slashed wins
+            ("202600000000 Gestión con Perito", None),  # all zeros after the year
+            ("202612345 Gestión con Perito", None),  # under 10 digits
+            ("12345 Gestión con Perito", None),
+            ("979123456 Gestión con Perito", None),  # a phone-shaped run
+            ("199901234567 Gestión con Perito", None),  # not 20xx
+            ("2026٠١٢٣٤٥٦٧ Gestión con Perito", None),  # non-ASCII digits never make a ref
+        ],
+    )
+    def test_slashless_fallback(self, subject, expected):
+        from pipeline.claim_data import parse_claim_ref
+
+        assert parse_claim_ref(subject, slashless=True) == expected
+
+    def test_slashless_is_off_for_other_types(self):
+        from pipeline.claim_data import parse_claim_ref
+
+        assert parse_claim_ref("202601234567 Comunicación a colaborador", slashless=False) is None
+        assert parse_claim_ref("2026/41 Comunicación a colaborador", slashless=False) == (
+            "2026",
+            "41",
+        )
+
+    def test_other_types_reject_a_slashless_subject(self):
+        msg = _make_gmail_message("202601234567 Comunicación a colaborador", COMUNICACION_BODY)
+        assert ClaimData.from_msg_data(msg) is None

@@ -8,6 +8,7 @@ the original; field extraction is delegated to the FieldExtractor seam
 import base64
 import html
 import re
+import string
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 
@@ -16,13 +17,28 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from pipeline.extraction import FieldExtractor
 
-# The three subject substrings that make an email claim-bearing. Single source
+# The subject substrings that make an email claim-bearing. Single source
 # for from_subject AND the 5b probe's matching criterion (gmail-client C6) —
 # hoisting them is behavior-identical, guarded by the ported parity tests.
 DECLARACION_MARKER: Final = "Declaración de siniestro a colaborador"
 ASISTENCIA_MARKER: Final = "Solicitud de asistencia a colaborador"
 COMUNICACION_MARKER: Final = "Comunicación a colaborador"
-CLAIM_SUBJECT_MARKERS: Final = (DECLARACION_MARKER, ASISTENCIA_MARKER, COMUNICACION_MARKER)
+# Keeps its accent: Gmail's subject search is accent-sensitive (gestion-perito spike).
+GESTION_PERITO_MARKER: Final = "Gestión con Perito"
+CLAIM_SUBJECT_MARKERS: Final = (
+    DECLARACION_MARKER,
+    ASISTENCIA_MARKER,
+    COMUNICACION_MARKER,
+    GESTION_PERITO_MARKER,
+)
+# A Gestión con Perito notice ends where the insurer's disclaimer starts.
+AVISO_LEGAL_MARKER: Final = "AVISO LEGAL"
+
+_SLASHED_REF = re.compile(r"(\d{4})/(\d+)")
+# Gestión con Perito subjects carry no slash: a 20xx year, then the claim
+# number zero-padded behind it. ≥10 digits so a short or phone-shaped run
+# can't become a ref that matches some unrelated card.
+_SLASHLESS_REF = re.compile(r"\b(20\d\d)(\d{6,})\b", re.ASCII)
 
 
 class ClaimType(Enum):
@@ -34,11 +50,16 @@ class ClaimType(Enum):
         "Solicitud de asistencia electricidad de emergencia"
     )
     COMUNICACION_A_COLABORADOR = "Comunicación a colaborador"
+    GESTION_CON_PERITO = GESTION_PERITO_MARKER
 
     @classmethod
     def from_subject(cls, subject: str | None, body: str | None) -> "ClaimType | None":
         if not subject:
             return None
+        # First: classified on the subject alone, before the asistencia branch
+        # can raise on a body without a service marker.
+        if GESTION_PERITO_MARKER in subject:
+            return cls.GESTION_CON_PERITO
         if DECLARACION_MARKER in subject:
             if "urgente" in subject.lower():
                 return cls.DECLARACION_URGENTE
@@ -55,6 +76,33 @@ class ClaimType(Enum):
         elif COMUNICACION_MARKER in subject:
             return cls.COMUNICACION_A_COLABORADOR
         return None
+
+
+# The types that post an @board comment on an existing card instead of creating one.
+COMMENT_TYPES: Final = frozenset(
+    {ClaimType.COMUNICACION_A_COLABORADOR, ClaimType.GESTION_CON_PERITO}
+)
+
+
+def parse_claim_ref(subject: str, *, slashless: bool) -> tuple[str, str] | None:
+    """(year, claim_number) from the subject's YYYY/N; with `slashless`, fall
+    back to the 20xx + zero-padded form with the zeros dropped — silently, it
+    is the expected shape for Gestión con Perito."""
+    match = _SLASHED_REF.search(subject)
+    if match:
+        return match.group(1), match.group(2)
+    if slashless:
+        match = _SLASHLESS_REF.search(subject)
+        if match and match.group(2).lstrip("0"):
+            return match.group(1), match.group(2).lstrip("0")
+    return None
+
+
+def gestion_notice(body: str) -> str | None:
+    """The notice: the body up to the first AVISO LEGAL (the whole body when
+    absent), trimmed of whitespace and edge emphasis markers."""
+    notice = body.split(AVISO_LEGAL_MARKER, 1)[0].strip(string.whitespace + "*")
+    return notice or None
 
 
 class ClaimData(BaseModel):
@@ -90,10 +138,9 @@ class ClaimData(BaseModel):
         # coupled to _html_to_plain's exact whitespace output (spec REQ-2).
         body = cls._to_plain(raw_body)
 
-        pattern = r"(\d{4})/(\d+)"
-        match = re.search(pattern, subject or "")
         claim_type = ClaimType.from_subject(subject, body)
-        if match and claim_type is not None:
+        ref = parse_claim_ref(subject or "", slashless=claim_type is ClaimType.GESTION_CON_PERITO)
+        if ref and claim_type is not None:
             if extractor is None:
                 # Local import: extraction imports ClaimType from this module.
                 from pipeline.extraction import RegexFieldExtractor
@@ -101,8 +148,8 @@ class ClaimData(BaseModel):
                 extractor = RegexFieldExtractor()
             fields = extractor.extract(claim_type, subject, body, raw_body)
             return cls(
-                year=match.group(1),
-                claim_number=match.group(2),
+                year=ref[0],
+                claim_number=ref[1],
                 type=claim_type,
                 subject=subject,
                 email_body=body,
@@ -220,7 +267,7 @@ def build_card_comment(claim: ClaimData) -> str:
         return f"@board Nueva brico asistencia en {claim.town.upper()}"
     if claim.type is ClaimType.SOLICITUD_ASISTENCIA_ENVIO_PROFESIONALES:
         return f"@board Nuevo envío de profesionales en {claim.town.upper()}"
-    if claim.type is ClaimType.COMUNICACION_A_COLABORADOR:
+    if claim.type in COMMENT_TYPES:
         return f"@board {claim.observaciones}"
     if claim.type is ClaimType.DECLARACION_URGENTE:
         return f"@board Parte URGENTE en {claim.town.upper()}"

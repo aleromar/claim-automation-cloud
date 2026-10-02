@@ -13,7 +13,6 @@ the relabel earlier.
 """
 
 import logging
-import re
 from datetime import UTC, datetime
 from email.utils import parseaddr
 from time import monotonic
@@ -28,13 +27,17 @@ from core.config import Settings, get_settings
 from core.secret_store import get_store
 from core.state_store import ClaimRecord, RunCounts, get_state_store
 from pipeline.claim_data import (
+    AVISO_LEGAL_MARKER,
     CLAIM_SUBJECT_MARKERS,
+    COMMENT_TYPES,
+    GESTION_PERITO_MARKER,
     ClaimData,
     ClaimType,
     build_card_comment,
     build_card_description,
     build_card_name,
     build_pdf_filename,
+    parse_claim_ref,
 )
 from pipeline.extraction import get_field_extractor
 from pipeline.gmail_client import GmailClient
@@ -69,6 +72,11 @@ ProcessedAction = Literal["card", "comment", "dedup_skip"]
 # by KQL on the email_failed line (`message has "sender_not_allowed"`).
 REASON_SENDER_NOT_ALLOWED: Final = "sender_not_allowed"
 REASON_NO_SENDER: Final = "no_sender"
+# gestion-perito REQ-4: failure reasons (formatted with ref=) and the WARNING
+# event for a notice that ran to the end of the body.
+REASON_GESTION_NO_CARD: Final = "gestión con perito {ref} has no existing card"
+REASON_NO_NOTICE_TEXT: Final = "gestión con perito {ref} has no notice text"
+EVENT_NO_AVISO_LEGAL: Final = "gestion_perito_no_aviso_legal"
 
 
 def parse_sender_allowlist(raw: str) -> frozenset[str]:
@@ -251,9 +259,11 @@ def process_mailbox(
 
 def _claim_ref_of(message: dict) -> str:
     """Best-effort claim ref for the failure log (REQ-2) — the boundary can't
-    rely on a parsed ClaimData."""
-    match = re.search(r"\d{4}/\d+", ClaimData.extract_subject(message) or "")
-    return match.group(0) if match else "unparsed"
+    rely on a parsed ClaimData. The marker test matches from_subject, which
+    checks the Gestión con Perito marker first."""
+    subject = ClaimData.extract_subject(message) or ""
+    ref = parse_claim_ref(subject, slashless=GESTION_PERITO_MARKER in subject)
+    return f"{ref[0]}/{ref[1]}" if ref else "unparsed"
 
 
 def _process_one(
@@ -283,12 +293,27 @@ def _process_one(
         if claim is None:
             raise ValueError("claim-marked subject without a parseable YYYY/N reference")
         claim_ref = f"{claim.year}/{claim.claim_number}"
-    if claim.type is ClaimType.COMUNICACION_A_COLABORADOR:
+    if claim.type in COMMENT_TYPES:
+        gestion = claim.type is ClaimType.GESTION_CON_PERITO
+        if gestion and not (claim.observaciones or "").strip():
+            # An empty notice must not reach the board as "@board None".
+            raise ValueError(REASON_NO_NOTICE_TEXT.format(ref=claim_ref))
         # Live search on purpose (REQ-8): an archived card must fail the email;
         # the ledger is not consulted and no row is written (RowKey collision).
         card = trello.find_card_by_claim_ref(claim_ref)
         if card is None:
+            if gestion:
+                raise ValueError(REASON_GESTION_NO_CARD.format(ref=claim_ref))
             raise ValueError(f"comunicación {claim_ref} has no existing card")
+        if gestion and AVISO_LEGAL_MARKER not in claim.email_body:
+            # The whole body became the comment — expected never; worth a look.
+            logger.warning(
+                "%s %s ref=%s id=%s",
+                _PIPELINE_LOG_PREFIX,
+                EVENT_NO_AVISO_LEGAL,
+                claim_ref,
+                message["id"],
+            )
         trello.add_comment(card["id"], build_card_comment(claim))
         return ACTION_COMMENT
     if history.get_claim(claim_ref) is not None:
