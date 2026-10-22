@@ -8,7 +8,6 @@ cause renders as one counted group, not one row per occurrence.
 """
 
 import argparse
-import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -86,17 +85,6 @@ def _heartbeat_count(query: dict[str, Any]) -> int:
     return int(rows[0]["Count"]) if rows else 0
 
 
-# datetime.weekday(): Monday == 0 … Sunday == 6.
-_NO_SCHEDULED_WAKE: Final = frozenset({5, 6})
-
-
-def _heartbeat_expected(date: str) -> bool:
-    """`date` is the UTC calendar day the queries cover. The worker timer wakes
-    06–18 UTC Mon–Fri only (D5), so a Saturday or Sunday holds no scheduled
-    wake and zero heartbeats there is a quiet weekend, not dead telemetry."""
-    return dt.date.fromisoformat(date).weekday() not in _NO_SCHEDULED_WAKE
-
-
 def _severity_label(row: dict[str, Any]) -> str:
     if row.get("itemType") == "exception":
         return "EXCEPTION"
@@ -163,7 +151,7 @@ def _render_body(groups: list[dict[str, Any]], heartbeat_missing: bool) -> str:
     parts = []
     if heartbeat_missing:
         parts.append(
-            "**⚠ No worker heartbeat in the window** — the weekday-daytime timer logged "
+            "**⚠ No worker heartbeat in the window** — the 20-min timer logged "
             "nothing; investigate scheduler health alongside the failures below."
         )
     shown = groups[:TOP_GROUPS]
@@ -192,7 +180,7 @@ def build_result(
     failures: dict[str, Any], heartbeat_query: dict[str, Any], date: str
 ) -> dict[str, Any]:
     rows = _rows_as_dicts(failures)
-    heartbeat_missing = _heartbeat_count(heartbeat_query) == 0 and _heartbeat_expected(date)
+    heartbeat_missing = _heartbeat_count(heartbeat_query) == 0
     if not rows:
         if heartbeat_missing:
             return {
