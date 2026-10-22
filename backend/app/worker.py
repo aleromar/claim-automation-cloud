@@ -28,10 +28,8 @@ logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer("app.worker")
 
 WORKER_FUNCTION_NAME = "worker"
-# NCRONTAB (6-field): second 0, every 20th minute, 06–18 UTC, Mon–Fri (D5). Timer
-# schedules are UTC-only on Linux Consumption (WEBSITE_TIME_ZONE is Windows-only), so
-# the window is widened to cover 08–19 local under both CET (+1) and CEST (+2).
-WORKER_TIMER_SCHEDULE = "0 */20 6-18 * * 1-5"
+# NCRONTAB (6-field): second 0, every 20th minute, around the clock, every day (D5).
+WORKER_TIMER_SCHEDULE = "0 */20 * * * *"
 WORKER_RUN_LOG_PREFIX = "worker_run"  # App Insights: traces | where message startswith this
 
 
